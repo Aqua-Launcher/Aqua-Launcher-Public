@@ -7,7 +7,7 @@ import { recommendMaxRam } from './system.js'
 export const THEMES = ['midnight', 'slate']
 export const ACCENTS = ['aqua', 'ocean', 'steel']
 export const FONT_FAMILIES = ['minecraft', 'quicksand']
-const LEGACY_ACCENTS = { grass: 'aqua', emerald: 'ocean', lime: 'steel' }
+const LEGACY_ACCENTS = { grass: 'aqua', emerald: 'ocean', lime: 'steel', violet: 'aqua' }
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error']
 
 const SURFACE_MODES = ['block', 'color', 'off']
@@ -21,7 +21,7 @@ export const DEFAULT_CUSTOM_THEME = {
   titlebar: { mode: 'block', block: 'oak_planks', color: '#b08b52', opacity: 35, pixelSize: 40 },
   backdrop: { mode: 'off', block: 'stone', color: '#8f8f8f', opacity: 18, pixelSize: 96 },
   accentMode: 'theme',
-  accentColor: '#5cc8e8',
+  accentColor: '#2f7fe0',
 }
 
 export function createDefaultSettings({ totalMemMb, instancesRoot }) {
@@ -32,13 +32,11 @@ export function createDefaultSettings({ totalMemMb, instancesRoot }) {
     accent: 'aqua',
     customTheme: normalizeCustomTheme({}, DEFAULT_CUSTOM_THEME),
     fontFamily: 'minecraft',
-    // Rounded corners are tied to the interface font while the link is on:
-    // Quicksand rounds every surface, Minecraft squares it off again.
-    roundedCorners: false,
+    // The locks keep rounding on and 3D chrome off while they are engaged;
+    // unlinking hands each choice to its own switch.
+    roundedCorners: true,
     roundedCornersLinked: true,
-    // The chunky 3D chrome follows the interface font the same way: the pixel
-    // font extrudes controls, Quicksand flattens them again.
-    chunkyChrome: true,
+    chunkyChrome: false,
     chunkyChromeLinked: true,
     uiScale: 1,
     reduceMotion: false,

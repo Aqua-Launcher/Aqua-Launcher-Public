@@ -71,9 +71,46 @@ export function nativeClassifier(library, context) {
   return template.replace('${arch}', archBits)
 }
 
+/**
+ * Identifies a library by Maven artifact rather than by its full coordinate.
+ * Loader profiles inherit a Mojang version and often carry a newer build of the
+ * same artifact (ASM is the common one). Java can only load one copy of a
+ * class, so the classpath keeps the loader's build and drops the parent's.
+ */
+export function libraryArtifactKey(library) {
+  const name = typeof library?.name === 'string' ? library.name.trim() : ''
+  if (!name) return null
+  const [coordinate, extension = 'jar'] = name.split('@')
+  const parts = coordinate.split(':')
+  if (parts.length < 3) return null
+  const [group, artifact, , classifier] = parts
+  if (!group || !artifact) return null
+  return `${group}:${artifact}${classifier ? `:${classifier}` : ''}@${extension}`
+}
+
+/**
+ * Later entries win, matching the parent→child order produced by mergeVersions.
+ * Different classifiers (base jars, natives) and extensions stay separate.
+ */
+export function dedupeLibraries(libraries) {
+  const unique = new Map()
+  for (const library of libraries) {
+    const key = libraryArtifactKey(library)
+    if (!key) {
+      // Unnamed entries cannot be compared safely, so keep them all.
+      unique.set(Symbol('library'), library)
+      continue
+    }
+    unique.set(key, library)
+  }
+  return [...unique.values()]
+}
+
 export function applicableLibraries(version, context) {
   const libraries = Array.isArray(version?.libraries) ? version.libraries : []
-  return libraries.filter((library) => rulesAllow(library.rules, context))
+  // Rules run first: if a loader's OS-specific override does not apply here,
+  // the Mojang library it would have replaced must remain on the classpath.
+  return dedupeLibraries(libraries.filter((library) => rulesAllow(library.rules, context)))
 }
 
 export function collectArgumentEntries(entries, context) {

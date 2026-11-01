@@ -383,8 +383,8 @@ export class BedrockVersionsService {
   /**
    * Downloads a version into the launcher's Bedrock folder. APPX packages are
    * unpacked in place (the signature is dropped, exactly as the version
-   * switchers do) so Windows can register them; MSIXVC packages stay as files
-   * because only the Store can install them.
+   * switchers do) so Windows can register them; MSIXVC packages stay as files,
+   * because Windows only takes those by installing them.
    */
   async download(version) {
     const entry = await this.findVersion(version)
@@ -527,7 +527,7 @@ export class BedrockVersionsService {
   async registerCommand(version) {
     const entry = await this.findVersion(version)
     if (entry && entry.package !== 'appx') {
-      throw new Error('MSIXVC builds can only be installed by the Microsoft Store.')
+      throw new Error('MSIXVC builds install through Windows instead. Use Install build.')
     }
     const directory = this.versionDirectory(version)
     const manifest = path.join(directory, 'AppxManifest.xml')
@@ -536,6 +536,71 @@ export class BedrockVersionsService {
     return {
       manifest,
       command: `Add-AppxPackage -Path "${manifest}" -Register -ForceApplicationShutdown`,
+    }
+  }
+
+  /**
+   * Installs a downloaded MSIXVC build. Those packages are encrypted Store
+   * containers with no manifest to point at, so Windows has to deploy them — which
+   * replaces the copy it is currently running.
+   *
+   * Deployment deliberately runs unelevated: an administrator prompt would install
+   * the build for the administrator's account instead of the player's, exactly as
+   * with registration.
+   */
+  async install(version) {
+    if (process.platform !== 'win32') throw new Error('Installing a Bedrock build needs Windows.')
+    const entry = await this.findVersion(version)
+    if (entry && entry.package !== 'msixvc') {
+      throw new Error('That build unpacks into a folder. Register it instead of installing it.')
+    }
+
+    const file = path.join(this.versionDirectory(version), 'package.msixvc')
+    const stat = await fsp.stat(file).catch(() => null)
+    if (!stat?.isFile()) throw new Error('Download that version first.')
+
+    const before = await this.bedrockService.status({ force: true }).catch(() => null)
+    const replacedVersion = before?.editions?.[0]?.version || null
+    // Windows refuses an older package unless replacing the newer one is explicit.
+    const downgrade = replacedVersion ? compareVersions(replacedVersion, version) < 0 : false
+    const command = `Add-AppxPackage -Path "${file}"${downgrade ? ' -ForceUpdateFromAnyVersion' : ''}`
+
+    this.progress(version, { phase: 'installing', receivedBytes: 0, totalBytes: null })
+    const result = await this.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$ErrorActionPreference = 'Stop'; ${command}`,
+      ],
+      { timeout: 60 * 60 * 1000 },
+    )
+
+    // The framework list is only meaningful for the build Windows is running.
+    this.installedCache = null
+    const after = await this.bedrockService.status({ force: true }).catch(() => null)
+    const installed = after?.editions?.[0] || null
+    // Windows renumbers some packages, so a listed Minecraft plus a clean exit is
+    // the success signal; a served version match alone is the fallback.
+    const applied = Boolean(installed) && (result.ok || installed.version === version)
+    if (!applied) {
+      const message = describeDeploymentFailure(result) || 'Windows did not install that build.'
+      this.logger?.warn('Could not install a Bedrock build', { version, message })
+      throw new Error(message)
+    }
+
+    this.logger?.info('Installed a Bedrock build', { version, replaced: replacedVersion, detected: installed.version })
+    this.progress(version, { phase: 'done', receivedBytes: 0, totalBytes: null })
+    return {
+      version,
+      file,
+      command,
+      replacedVersion,
+      forcedDowngrade: downgrade,
+      installedVersion: installed.version || null,
+      packageVersion: installed.packageVersion || null,
+      installLocation: installed.installLocation || null,
     }
   }
 

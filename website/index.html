@@ -1,0 +1,1178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aqua Launcher — Java, Bedrock &amp; Horizon</title>
+    <meta
+      name="description"
+      content="Aqua is a local-first desktop launcher for Minecraft: Java and Bedrock editions, plus Horizon's Rust client. Versions, mods, worlds, backups, servers, and logs in one calm window."
+    />
+    <meta name="theme-color" content="#071019" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Aqua Launcher — Java, Bedrock &amp; Horizon" />
+    <meta
+      property="og:description"
+      content="Every way to play, one window. Java, Bedrock, and Horizon with versions, mods, worlds, backups, servers, and logs without the busywork."
+    />
+    <meta property="og:image" content="assets/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Aqua Launcher — Every way to play. One launcher." />
+    <meta property="og:site_name" content="Aqua Launcher" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="assets/favicon.png" />
+    <link rel="preload" href="assets/fonts/minecraftia.woff" as="font" type="font/woff" crossorigin />
+    <link rel="preload" as="image" href="assets/artwork/tricky-trials.jpg" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      document.documentElement.classList.add('js');
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+      <symbol id="i-arrow" viewBox="0 0 256 256"><g fill="currentColor"><path d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></g></symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 256 256"><g fill="currentColor"><path d="M200,64V168a8,8,0,0,1-16,0V83.31L69.66,197.66a8,8,0,0,1-11.32-11.32L172.69,72H88a8,8,0,0,1,0-16H192A8,8,0,0,1,200,64Z"/></g></symbol>
+      <symbol id="i-download" viewBox="0 0 256 256"><g fill="currentColor"><path d="M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z"/></g></symbol>
+      <symbol id="i-play" viewBox="0 0 256 256"><g fill="currentColor"><path d="M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z"/></g></symbol>
+      <symbol id="i-pause" viewBox="0 0 256 256"><g fill="currentColor"><path d="M200,32H160a16,16,0,0,0-16,16V208a16,16,0,0,0,16,16h40a16,16,0,0,0,16-16V48A16,16,0,0,0,200,32Zm0,176H160V48h40ZM96,32H56A16,16,0,0,0,40,48V208a16,16,0,0,0,16,16H96a16,16,0,0,0,16-16V48A16,16,0,0,0,96,32Zm0,176H56V48H96Z"/></g></symbol>
+      <symbol id="i-prev" viewBox="0 0 256 256"><g fill="currentColor"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"/></g></symbol>
+      <symbol id="i-next" viewBox="0 0 256 256"><g fill="currentColor"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></g></symbol>
+      <symbol id="i-cpu" viewBox="0 0 256 256"><g fill="currentColor"><path d="M152,96H104a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V104A8,8,0,0,0,152,96Zm-8,48H112V112h32Zm88,0H216V112h16a8,8,0,0,0,0-16H216V56a16,16,0,0,0-16-16H160V24a8,8,0,0,0-16,0V40H112V24a8,8,0,0,0-16,0V40H56A16,16,0,0,0,40,56V96H24a8,8,0,0,0,0,16H40v32H24a8,8,0,0,0,0,16H40v40a16,16,0,0,0,16,16H96v16a8,8,0,0,0,16,0V216h32v16a8,8,0,0,0,16,0V216h40a16,16,0,0,0,16-16V160h16a8,8,0,0,0,0-16Zm-32,56H56V56H200v95.87s0,.09,0,.13,0,.09,0,.13V200Z"/></g></symbol>
+      <symbol id="i-check" viewBox="0 0 256 256"><g fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></g></symbol>
+      <symbol id="i-copy" viewBox="0 0 256 256"><g fill="currentColor"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></g></symbol>
+      <symbol id="i-expand" viewBox="0 0 256 256"><g fill="currentColor"><path d="M216,48V88a8,8,0,0,1-16,0V56H168a8,8,0,0,1,0-16h40A8,8,0,0,1,216,48ZM88,200H56V168a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H88a8,8,0,0,0,0-16Zm120-40a8,8,0,0,0-8,8v32H168a8,8,0,0,0,0,16h40a8,8,0,0,0,8-8V168A8,8,0,0,0,208,160ZM88,40H48a8,8,0,0,0-8,8V88a8,8,0,0,0,16,0V56H88a8,8,0,0,0,0-16Z"/></g></symbol>
+      <symbol id="i-close" viewBox="0 0 256 256"><g fill="currentColor"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></g></symbol>
+      <symbol id="i-layers" viewBox="0 0 256 256"><g fill="currentColor"><path d="M230.91,172A8,8,0,0,1,228,182.91l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,36,169.09l92,53.65,92-53.65A8,8,0,0,1,230.91,172ZM220,121.09l-92,53.65L36,121.09A8,8,0,0,0,28,134.91l96,56a8,8,0,0,0,8.06,0l96-56A8,8,0,1,0,220,121.09ZM24,80a8,8,0,0,1,4-6.91l96-56a8,8,0,0,1,8.06,0l96,56a8,8,0,0,1,0,13.82l-96,56a8,8,0,0,1-8.06,0l-96-56A8,8,0,0,1,24,80Zm23.88,0L128,126.74,208.12,80,128,33.26Z"/></g></symbol>
+      <symbol id="i-grid" viewBox="0 0 256 256"><g fill="currentColor"><path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z"/></g></symbol>
+      <symbol id="i-update" viewBox="0 0 256 256"><g fill="currentColor"><path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.41,61.27a96,96,0,0,1,135,.79L208,76.69V48a8,8,0,0,1,16,0ZM186.41,183.29a80,80,0,0,1-112.47-.66L59.31,168H88a8,8,0,0,0,0-16H40a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V179.31l14.63,14.63A95.43,95.43,0,0,0,130,222.06h.53a95.36,95.36,0,0,0,67.07-27.33,8,8,0,0,0-11.18-11.44Z"/></g></symbol>
+      <symbol id="i-world" viewBox="0 0 256 256"><g fill="currentColor"><path d="M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm88,104a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48ZM40,128a87.61,87.61,0,0,1,3.33-24H81.84a157.44,157.44,0,0,0,0,48H43.33A87.61,87.61,0,0,1,40,128ZM154,88H102a115.11,115.11,0,0,1,26-45A115.27,115.27,0,0,1,154,88Zm52.33,0H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM107.59,42.4A135.28,135.28,0,0,0,85.29,88H49.63A88.29,88.29,0,0,1,107.59,42.4ZM49.63,168H85.29a135.28,135.28,0,0,0,22.3,45.6A88.29,88.29,0,0,1,49.63,168Zm98.78,45.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"/></g></symbol>
+      <symbol id="i-signal" viewBox="0 0 256 256"><g fill="currentColor"><path d="M168,72V200a8,8,0,0,1-16,0V72a8,8,0,0,1,16,0Zm-48,32a8,8,0,0,0-8,8v88a8,8,0,0,0,16,0V112A8,8,0,0,0,120,104ZM80,144a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V152A8,8,0,0,0,80,144ZM40,184a8,8,0,0,0-8,8v8a8,8,0,0,0,16,0v-8A8,8,0,0,0,40,184Z"/></g></symbol>
+      <symbol id="i-swatch" viewBox="0 0 256 256"><g fill="currentColor"><path d="M88,180a12,12,0,1,1-12-12A12,12,0,0,1,88,180Zm152-23.81V208a16,16,0,0,1-16,16H76a46.36,46.36,0,0,1-7.94-.68,44,44,0,0,1-35.43-50.95l25-143.13a15.94,15.94,0,0,1,18.47-13L130.84,26a16,16,0,0,1,12.92,18.52l-12.08,69L199.49,89a16,16,0,0,1,20.45,9.52L239,150.69A18.35,18.35,0,0,1,240,156.19ZM103,184.87,128,41.74,73.46,32l-25,143.1A28,28,0,0,0,70.9,207.57,27.29,27.29,0,0,0,91.46,203,27.84,27.84,0,0,0,103,184.87ZM116.78,195,224,156.11,204.92,104,128.5,131.7l-9.78,55.92A44.63,44.63,0,0,1,116.78,195ZM224,173.12,127.74,208H224Z"/></g></symbol>
+      <symbol id="i-terminal" viewBox="0 0 256 256"><g fill="currentColor"><path d="M128,128a8,8,0,0,1-3,6.25l-40,32a8,8,0,1,1-10-12.5L107.19,128,75,102.25a8,8,0,1,1,10-12.5l40,32A8,8,0,0,1,128,128Zm48,24H136a8,8,0,0,0,0,16h40a8,8,0,0,0,0-16Zm56-96V200a16,16,0,0,1-16,16H40a16,16,0,0,1-16-16V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56ZM216,200V56H40V200H216Z"/></g></symbol>
+      <symbol id="i-shield" viewBox="0 0 256 256"><g fill="currentColor"><path d="M208,40H48A16,16,0,0,0,32,56v56c0,52.72,25.52,84.67,46.93,102.19,23.06,18.86,46,25.26,47,25.53a8,8,0,0,0,4.2,0c1-.27,23.91-6.67,47-25.53C198.48,196.67,224,164.72,224,112V56A16,16,0,0,0,208,40Zm0,72c0,37.07-13.66,67.16-40.6,89.42A129.3,129.3,0,0,1,128,223.62a128.25,128.25,0,0,1-38.92-21.81C61.82,179.51,48,149.3,48,112l0-56,160,0ZM82.34,141.66a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32l-56,56a8,8,0,0,1-11.32,0Z"/></g></symbol>
+      <symbol id="i-clock" viewBox="0 0 256 256"><g fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z"/></g></symbol>
+      <symbol id="i-monitor" viewBox="0 0 256 256"><g fill="currentColor"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H208a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40Zm8,136a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H208a8,8,0,0,1,8,8Zm-48,48a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,224Z"/></g></symbol>
+      <symbol id="i-github" viewBox="0 0 256 256"><g fill="currentColor"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z"/></g></symbol>
+      <symbol id="i-drop" viewBox="0 0 256 256"><g fill="currentColor"><path d="M174,47.75a254.19,254.19,0,0,0-41.45-38.3,8,8,0,0,0-9.18,0A254.19,254.19,0,0,0,82,47.75C54.51,79.32,40,112.6,40,144a88,88,0,0,0,176,0C216,112.6,201.49,79.32,174,47.75ZM128,216a72.08,72.08,0,0,1-72-72c0-57.23,55.47-105,72-118,16.53,13,72,60.75,72,118A72.08,72.08,0,0,1,128,216Zm55.89-62.66a57.6,57.6,0,0,1-46.56,46.55A8.75,8.75,0,0,1,136,200a8,8,0,0,1-1.32-15.89c16.57-2.79,30.63-16.85,33.44-33.45a8,8,0,0,1,15.78,2.68Z"/></g></symbol>
+    </svg>
+
+    <header class="header" data-header>
+      <div class="wrap header__inner">
+        <a class="brand" href="#top" aria-label="Aqua Launcher home">
+          <img class="brand__icon" src="assets/icon.png" alt="" width="32" height="32" />
+          <span class="brand__text">
+            <span class="brand__name">Aqua</span>
+            <span class="brand__sub">Launcher</span>
+          </span>
+        </a>
+
+        <nav class="nav" id="site-nav" aria-label="Primary" data-nav>
+          <a class="nav__link" href="#features">Features</a>
+          <a class="nav__link" href="#tour">Screenshots</a>
+          <a class="nav__link" href="#horizon">Horizon</a>
+          <a class="nav__link" href="#bedrock">Bedrock</a>
+          <a class="nav__link" href="#roadmap">Roadmap</a>
+          <a class="nav__link" href="#faq">FAQ</a>
+          <div class="nav__mobile">
+            <a class="nav__source" href="https://github.com/Ch1nDev/Aqua" target="_blank" rel="noopener noreferrer">
+              <svg class="icon" aria-hidden="true"><use href="#i-github" /></svg>
+              View source on GitHub
+            </a>
+            <a class="btn btn--primary" href="#get">Get Aqua</a>
+          </div>
+        </nav>
+
+        <div class="header__actions">
+          <a class="btn btn--primary btn--sm header__cta" href="#get">Get Aqua</a>
+          <button
+            class="nav-toggle"
+            type="button"
+            aria-label="Open menu"
+            aria-expanded="false"
+            aria-controls="site-nav"
+            data-nav-toggle
+          >
+            <span></span><span></span><span></span>
+          </button>
+        </div>
+      </div>
+    </header>
+    <div class="nav-backdrop" data-nav-backdrop hidden></div>
+
+    <main id="main">
+      <!-- Hero -->
+      <section class="hero" id="top">
+        <div
+          class="hero-slider"
+          data-hero-slider
+          role="region"
+          aria-roledescription="carousel"
+          aria-label="Minecraft key art"
+        >
+          <div class="hero-slide is-active" data-slide data-label="Tricky Trials" aria-hidden="false">
+            <img
+              src="assets/artwork/tricky-trials.jpg"
+              alt="Minecraft key art from Tricky Trials, with copper chambers, trial spawners, and hostile mobs."
+              width="1920"
+              height="1080"
+              fetchpriority="high"
+            />
+          </div>
+          <div class="hero-slide" data-slide data-label="Chaos Cubed" aria-hidden="true">
+            <img
+              src="assets/artwork/chaos-cubed.jpg"
+              alt="Minecraft key art from Chaos Cubed, with colorful blocks, characters, and a bright blue sky."
+              width="1920"
+              height="1080"
+              loading="lazy"
+            />
+          </div>
+          <div class="hero-slide" data-slide data-label="Mounts of Mayhem" aria-hidden="true">
+            <img
+              src="assets/artwork/mounts-of-mayhem.jpg"
+              alt="Minecraft key art from Mounts of Mayhem, with riders charging across a desert."
+              width="1920"
+              height="1080"
+              loading="lazy"
+            />
+          </div>
+        </div>
+        <div class="hero__shade" aria-hidden="true"></div>
+
+        <div class="wrap hero__inner">
+          <div class="hero__copy">
+            <p class="eyebrow reveal">
+              <img class="eyebrow__icon" src="assets/icon.png" alt="" width="16" height="16" />
+              <span class="eyebrow__prefix">Minecraft: </span>Java · Bedrock · Horizon
+              <span class="eyebrow__dot" aria-hidden="true">·</span>
+              <span class="eyebrow__muted">v1.0.0</span>
+            </p>
+            <h1 class="hero__title heading-1 reveal" style="--d: 60ms">
+              Every way to play.<br />
+              One launcher.
+            </h1>
+            <p class="hero__lede reveal" style="--d: 120ms">
+              Play Java, Bedrock, and Horizon from one local app. Keep versions, mods, worlds,
+              backups, servers, and logs together without switching launchers.
+            </p>
+            <div class="hero__actions reveal" style="--d: 180ms">
+              <a class="btn btn--primary" href="#get">
+                <svg class="icon" aria-hidden="true"><use href="#i-download" /></svg>
+                Get Aqua
+              </a>
+              <a
+                class="hero__source"
+                href="https://github.com/Ch1nDev/Aqua"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View source on GitHub
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+              </a>
+            </div>
+            <ul class="hero__meta reveal" style="--d: 240ms">
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                Windows 10/11
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                MIT licensed
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                No telemetry
+              </li>
+            </ul>
+          </div>
+
+          <aside class="hero-card reveal" style="--d: 160ms" aria-label="Aqua at a glance">
+            <div class="hero-card__head">
+              <span>Your library</span>
+              <span class="hero-card__status"><i aria-hidden="true"></i>Ready</span>
+            </div>
+            <div class="hero-card__stat">
+              <strong>3</strong>
+              <span>ways to play.<br />One Play button.</span>
+            </div>
+            <div class="edition-list">
+              <div class="edition">
+                <span class="edition__badge" aria-hidden="true">
+                  <svg class="icon"><use href="#i-world" /></svg>
+                </span>
+                <span class="edition__text">
+                  <b>Java Edition</b>
+                  <small>Fabric 1.21.10 · 4 GB</small>
+                </span>
+                <span class="edition__action">Play</span>
+              </div>
+              <div class="edition">
+                <span class="edition__badge edition__badge--bedrock" aria-hidden="true">
+                  <svg class="icon"><use href="#i-monitor" /></svg>
+                </span>
+                <span class="edition__text">
+                  <b>Bedrock Edition</b>
+                  <small>Minecraft for Windows · 1.21.101</small>
+                </span>
+                <span class="edition__action">Play</span>
+              </div>
+              <div class="edition">
+                <span class="edition__badge edition__badge--horizon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-cpu" /></svg>
+                </span>
+                <span class="edition__text">
+                  <b>Horizon</b>
+                  <small>Rust Edition · Minecraft 26.3</small>
+                </span>
+                <span class="edition__action">Play</span>
+              </div>
+            </div>
+            <p class="hero-card__note">
+              <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+              Java, Bedrock and Horizon — your files stay on your disk.
+            </p>
+          </aside>
+        </div>
+
+        <div class="hero__controls" data-hero-controls>
+          <button class="hero__arrow" type="button" data-hero-prev aria-label="Previous artwork">
+            <svg class="icon" aria-hidden="true"><use href="#i-prev" /></svg>
+          </button>
+          <div class="hero__dots" role="group" aria-label="Choose artwork">
+            <button
+              class="hero__dot is-active"
+              type="button"
+              data-hero-dot="0"
+              aria-label="Show Tricky Trials artwork"
+              aria-pressed="true"
+            ></button>
+            <button
+              class="hero__dot"
+              type="button"
+              data-hero-dot="1"
+              aria-label="Show Chaos Cubed artwork"
+              aria-pressed="false"
+            ></button>
+            <button
+              class="hero__dot"
+              type="button"
+              data-hero-dot="2"
+              aria-label="Show Mounts of Mayhem artwork"
+              aria-pressed="false"
+            ></button>
+          </div>
+          <button class="hero__arrow" type="button" data-hero-next aria-label="Next artwork">
+            <svg class="icon" aria-hidden="true"><use href="#i-next" /></svg>
+          </button>
+          <span class="hero__control-rule" aria-hidden="true"></span>
+          <span class="hero__slide-label" data-hero-label>Tricky Trials</span>
+          <button
+            class="hero__pause"
+            type="button"
+            data-hero-pause
+            aria-label="Pause artwork slideshow"
+            aria-pressed="false"
+          >
+            <svg class="icon hero__pause-icon" aria-hidden="true"><use href="#i-pause" /></svg>
+            <svg class="icon hero__play-icon" aria-hidden="true"><use href="#i-play" /></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- Stats -->
+      <section class="stats" aria-label="Aqua at a glance">
+        <div class="wrap stats__grid">
+          <div class="stat reveal">
+            <span class="stat__value">3</span>
+            <span class="stat__label"><b>ways to play</b><small>Java, Bedrock &amp; Horizon</small></span>
+          </div>
+          <div class="stat reveal" style="--d: 60ms">
+            <span class="stat__value">4</span>
+            <span class="stat__label"><b>mod loaders</b><small>Fabric, Quilt, Forge, NeoForge</small></span>
+          </div>
+          <div class="stat reveal" style="--d: 120ms">
+            <span class="stat__value">500+</span>
+            <span class="stat__label"><b>Bedrock builds</b><small>In the version catalogue</small></span>
+          </div>
+          <div class="stat reveal" style="--d: 180ms">
+            <span class="stat__value">0</span>
+            <span class="stat__label"><b>telemetry</b><small>Local files, local play</small></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Features -->
+      <section class="section" id="features">
+        <div class="wrap">
+          <div class="section__head">
+            <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Inside the launcher</p>
+            <h2 class="section__title reveal" style="--d: 60ms">Everything between<br /> you and the game.</h2>
+            <p class="section__lede reveal" style="--d: 120ms">
+              Profiles, content, saves, servers, and the messy bits in between. Aqua handles the
+              plumbing so a session is one click, not five.
+            </p>
+          </div>
+
+          <div class="bento">
+            <article class="card card--wide reveal">
+              <div class="card__head">
+                <span class="card__icon"><svg class="icon" aria-hidden="true"><use href="#i-layers" /></svg></span>
+                <h3 class="card__title">Three clients, one library</h3>
+              </div>
+              <p class="card__copy">
+                Java installations, Microsoft Store copies of Minecraft for Windows and Preview, and
+                Horizon's Rust build live side by side. Each Java profile resolves Fabric, Quilt,
+                Forge, or NeoForge against its own version. Point Play at any of them, or launch one
+                straight from its card.
+              </p>
+              <div class="card__visual">
+                <div class="mock" aria-hidden="true">
+                  <div class="mock__head">
+                    <span class="mock__title">Installations</span>
+                    <span class="mock-seg">
+                      <span class="is-on">Java 3</span>
+                      <span>Bedrock 2</span>
+                      <span>Horizon 1</span>
+                    </span>
+                  </div>
+                  <div class="inst is-on">
+                    <span class="cube cube--aqua"></span>
+                    <span class="inst__name">Fabric 1.21.10<small>1.21.10 · Fabric · 4 GB</small></span>
+                    <span class="mock-chip mock-chip--accent">Selected</span>
+                  </div>
+                  <div class="inst">
+                    <span class="cube cube--rust"></span>
+                    <span class="inst__name">Horizon 0.2.97<small>Minecraft 26.3 · Rust Edition</small></span>
+                    <span class="mock-chip mock-chip--ghost">Horizon</span>
+                  </div>
+                  <div class="inst">
+                    <span class="cube cube--store"></span>
+                    <span class="inst__name">Minecraft for Windows<small>1.21.101 · Microsoft Store</small></span>
+                    <span class="mock-chip mock-chip--ghost">Bedrock</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card card--narrow reveal">
+              <div class="card__head">
+                <span class="card__icon"><svg class="icon" aria-hidden="true"><use href="#i-update" /></svg></span>
+                <h3 class="card__title">Mods that stay current</h3>
+              </div>
+              <p class="card__copy">
+                Browse Modrinth content matched to your loader and version. Dependencies come along,
+                files are matched back by SHA-1, and updating keeps disabled mods disabled.
+              </p>
+              <div class="card__visual">
+                <div class="mock mock--tight" aria-hidden="true">
+                  <div class="mock__head">
+                    <span class="mock__title">Installed content</span>
+                    <span class="mock-chip mock-chip--accent">3 updates</span>
+                  </div>
+                  <div class="file-row">
+                    <span class="cube cube--sodium"></span>
+                    <span class="file-row__name">Sodium<small>Fabric · 0.6.x</small></span>
+                    <span class="mock-chip">Update</span>
+                  </div>
+                  <div class="file-row">
+                    <span class="cube cube--iris"></span>
+                    <span class="file-row__name">Iris Shaders<small>Fabric · 0.8.x</small></span>
+                    <span class="mock-chip">Update</span>
+                  </div>
+                  <div class="file-row">
+                    <span class="cube cube--dim"></span>
+                    <span class="file-row__name">Continuity<small>Disabled · stayed disabled</small></span>
+                    <span class="mock-chip mock-chip--ghost">Off</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card card--wide reveal" style="--d: 60ms">
+              <div class="card__head">
+                <span class="card__icon"><svg class="icon" aria-hidden="true"><use href="#i-world" /></svg></span>
+                <h3 class="card__title">Worlds you can't lose</h3>
+              </div>
+              <p class="card__copy">
+                Real names, game modes, versions, sizes, and last-played times — read straight from
+                the save. Make a ZIP backup in one click; a restore always lands in a new folder,
+                never over the original.
+              </p>
+              <div class="card__visual">
+                <div class="backup-list" aria-hidden="true">
+                  <div class="backup-row">
+                    <span class="zip"><span>ZIP</span></span>
+                    <span class="file-row__name">Survival<small>Today · 18:04 · 412 MB</small></span>
+                    <span class="mock-chip mock-chip--accent">Latest</span>
+                  </div>
+                  <div class="backup-row">
+                    <span class="zip zip--dim"><span>ZIP</span></span>
+                    <span class="file-row__name">Survival<small>Oct 21 · 19:12 · 401 MB</small></span>
+                    <span class="mock-chip">Restore</span>
+                  </div>
+                  <p class="mock-note">
+                    <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                    Restores create “Survival (restored)” — the original stays put.
+                  </p>
+                </div>
+              </div>
+            </article>
+
+            <article class="card card--narrow reveal">
+              <div class="card__head">
+                <span class="card__icon"><svg class="icon" aria-hidden="true"><use href="#i-signal" /></svg></span>
+                <h3 class="card__title">Servers, pinged properly</h3>
+              </div>
+              <p class="card__copy">
+                Java servers answer the same Server List Ping as the game's multiplayer menu. Bedrock
+                servers are queried over RakNet and joined through Minecraft's own deep link.
+              </p>
+              <div class="card__visual">
+                <div class="server-mock" aria-hidden="true">
+                  <div class="srv">
+                    <span class="srv__dot"></span>
+                    <span class="srv__name">The Reef<small>A quiet place to build.</small></span>
+                    <span class="srv__meta">12/40</span>
+                    <span class="srv__ping">28 ms</span>
+                  </div>
+                  <div class="srv">
+                    <span class="srv__dot srv__dot--bedrock"></span>
+                    <span class="srv__name">Creative Flatlands<small>Bedrock · port 19132</small></span>
+                    <span class="mock-chip mock-chip--ghost">Bedrock</span>
+                    <span class="srv__ping">41 ms</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="card card--full card--diag reveal">
+              <div class="card__head">
+                <span class="card__icon"><svg class="icon" aria-hidden="true"><use href="#i-terminal" /></svg></span>
+                <h3 class="card__title">Logs, not guesswork</h3>
+              </div>
+              <p class="card__copy">
+                The launcher log, per-session game output, and crash reports are one search away.
+                Filter, copy, open the folder, or export a report without digging through AppData.
+              </p>
+              <div class="card__visual">
+                <div class="terminal" aria-hidden="true">
+                  <div class="terminal__bar">
+                    <span>crash-2026-10-28_18-42-11.txt</span>
+                    <span class="mock-chip mock-chip--danger">Exit code 1</span>
+                  </div>
+                  <pre><code><span class="log-dim">[18:42:11] [Render thread/INFO]</span> Backend library: LWJGL
+<span class="log-dim">[18:42:14] [Render thread/INFO]</span> Narrator library loaded
+<span class="log-error">[18:42:19] [Render thread/ERROR]</span> java.lang.OutOfMemoryError: Java heap space
+    at net.minecraft.client.main.Main.main(Main.java:242)
+<span class="log-dim">[18:42:19]</span> Game crashed with exit code 1</code></pre>
+                  <div class="terminal__foot">
+                    <span><svg class="icon" aria-hidden="true"><use href="#i-expand" /></svg>Open folder</span>
+                    <span><svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg>Copy report</span>
+                    <span><svg class="icon" aria-hidden="true"><use href="#i-update" /></svg>Export</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tagline -->
+      <section class="tagline" aria-labelledby="tagline-title">
+        <div class="wrap tagline__inner">
+          <p class="eyebrow"><span class="eyebrow__mark" aria-hidden="true"></span>Why Aqua</p>
+          <p class="tagline__text" id="tagline-title" data-tagline>
+            <span class="tagline__word">Three</span>
+            <span class="tagline__word">launchers.</span><br />
+            <span class="tagline__word">Three</span>
+            <span class="tagline__word">folders.</span><br />
+            <span class="tagline__word">One</span>
+            <span class="tagline__word">quiet</span>
+            <span class="tagline__word">window.</span>
+          </p>
+          <p class="tagline__note">
+            Java, Bedrock, and Horizon already live on your PC. Aqua gives them one library without
+            moving a world. No account, no telemetry, and nothing hidden in a cloud folder.
+          </p>
+        </div>
+      </section>
+
+      <!-- Screenshots -->
+      <section class="section section--flush" id="tour">
+        <div class="wrap">
+          <div class="tour__head">
+            <div>
+              <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Look inside</p>
+              <h2 class="section__title reveal" style="--d: 60ms">See it in place.</h2>
+            </div>
+            <div class="tour__tabs reveal" role="tablist" aria-label="Screenshot views" style="--d: 90ms">
+              <button
+                class="tour__tab is-active"
+                type="button"
+                role="tab"
+                id="tab-dashboard"
+                aria-selected="true"
+                aria-controls="panel-dashboard"
+                data-tour-tab="dashboard"
+              >
+                Dashboard
+              </button>
+              <button
+                class="tour__tab"
+                type="button"
+                role="tab"
+                id="tab-themes"
+                aria-selected="false"
+                aria-controls="panel-themes"
+                tabindex="-1"
+                data-tour-tab="themes"
+              >
+                Block themes
+              </button>
+            </div>
+          </div>
+
+          <div class="tour__stage reveal" style="--d: 120ms">
+            <div class="tour__panel" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" data-tour-panel="dashboard">
+              <button
+                class="tour__shot"
+                type="button"
+                data-lightbox
+                data-src="assets/screenshots/dashboard.jpg"
+                data-alt="Aqua Launcher dashboard listing a selected Minecraft installation, recent activity, and the player profile menu."
+                data-caption="Dashboard — the selected installation, recent activity, and the offline-profile prompt."
+                aria-label="View the dashboard screenshot at full size"
+              >
+                <img
+                  src="assets/screenshots/dashboard.jpg"
+                  alt="Aqua Launcher dashboard with the Minecraft 26.3 installation selected and recent activity listed."
+                  width="1360"
+                  height="860"
+                  loading="lazy"
+                />
+                <span class="tour__zoom"><svg class="icon" aria-hidden="true"><use href="#i-expand" /></svg></span>
+              </button>
+            </div>
+            <div class="tour__panel" id="panel-themes" role="tabpanel" aria-labelledby="tab-themes" data-tour-panel="themes" hidden>
+              <button
+                class="tour__shot"
+                type="button"
+                data-lightbox
+                data-src="assets/screenshots/themes.jpg"
+                data-alt="Aqua Launcher dashboard painted with a blue Minecraft block texture sidebar and game artwork."
+                data-caption="Block theme — a texture read from an installed client jar, with a matching accent."
+                aria-label="View the block theme screenshot at full size"
+              >
+                <img
+                  src="assets/screenshots/themes.jpg"
+                  alt="Aqua Launcher with a blue block theme applied to the sidebar and a Fabric 1.21.10 profile ready to play."
+                  width="1440"
+                  height="842"
+                  loading="lazy"
+                />
+                <span class="tour__zoom"><svg class="icon" aria-hidden="true"><use href="#i-expand" /></svg></span>
+              </button>
+            </div>
+          </div>
+          <p class="tour__caption" data-tour-caption>
+            Dashboard — the selected installation, recent activity, and the offline-profile prompt.
+          </p>
+          <p class="tour__note reveal">Real screenshots from Aqua. Game artwork comes from the installed version.</p>
+        </div>
+      </section>
+
+      <!-- Horizon -->
+      <section class="section horizon" id="horizon">
+        <div class="wrap horizon__inner">
+          <div class="horizon__copy">
+            <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Horizon · Rust Edition</p>
+            <h2 class="section__title reveal" style="--d: 60ms">Horizon, installed<br /> by Aqua.</h2>
+            <p class="section__lede reveal" style="--d: 120ms">
+              Horizon is the open-source Rust rewrite of Minecraft: Java Edition 26.3. Aqua downloads
+              the official client, provisions the Minecraft and Java files it pins, runs Horizon's
+              bundled preparer, then starts the Rust game directly — no Horizon launcher involved.
+            </p>
+            <ul class="ticks reveal" style="--d: 180ms">
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Official builds, checksum-verified.</b> Aqua pulls the Windows, macOS, or Linux release from <span class="mono">horizon-rust/horizon</span> and checks its SHA-256 before unpacking.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>One Play target.</b> Point the dashboard's Play button at any installed Horizon build, or start a specific build from its row.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Its own home.</b> Builds, downloads, and worlds live in Aqua's data folder. Horizon's launcher folder is never read.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Your copy still matters.</b> Horizon's preparer reads Minecraft: Java Edition files that Aqua installs, so you still need your own game copy.</span>
+              </li>
+            </ul>
+            <p class="section__foot reveal" style="--d: 240ms">
+              <a class="text-link" href="https://playhorizon.dev/" target="_blank" rel="noopener noreferrer">
+                About Horizon
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+              </a>
+            </p>
+          </div>
+
+          <div class="horizon__visual reveal" style="--d: 160ms">
+            <div class="horizon-panel" aria-hidden="true">
+              <div class="horizon-panel__head">
+                <span class="horizon-panel__title">
+                  <span class="horizon-wordmark">Horizon</span>
+                  <span class="mock-chip mock-chip--accent">Rust Edition</span>
+                </span>
+                <span class="mock-chip mock-chip--ghost">Win · macOS · Linux</span>
+              </div>
+              <p class="horizon-panel__sub">Minecraft: Java Edition 26.3 · Wilderness Bound</p>
+
+              <div class="horizon-hero">
+                <span class="horizon-hero__icon" aria-hidden="true">
+                  <svg class="icon"><use href="#i-cpu" /></svg>
+                </span>
+                <span class="horizon-hero__copy">
+                  <b>Horizon Minecraft 26.3</b>
+                  <small>v0.2.97 · prepared by Aqua</small>
+                </span>
+                <span class="mock-chip mock-chip--accent">Ready to play</span>
+              </div>
+
+              <dl class="horizon-facts">
+                <div><dt>Game folder</dt><dd>Aqua\horizon</dd></div>
+                <div><dt>Installed builds</dt><dd>2</dd></div>
+                <div><dt>Worlds</dt><dd>3</dd></div>
+              </dl>
+
+              <div class="horizon-actions">
+                <span class="horizon-play"><svg class="icon" aria-hidden="true"><use href="#i-play" /></svg>Play</span>
+                <span class="horizon-action">Game folder</span>
+                <span class="horizon-action">Worlds</span>
+                <span class="horizon-action">Builds</span>
+              </div>
+
+              <div class="horizon-builds">
+                <div class="horizon-build">
+                  <span class="horizon-build__tag">v0.2.97</span>
+                  <span class="horizon-build__meta">Minecraft 26.3 · installed by Aqua</span>
+                  <span class="mock-chip mock-chip--accent">Play target</span>
+                </div>
+                <div class="horizon-build">
+                  <span class="horizon-build__tag">v0.2.96</span>
+                  <span class="horizon-build__meta">Minecraft 26.3 · installed by Aqua</span>
+                  <span class="mock-chip">Prepared</span>
+                </div>
+              </div>
+
+              <p class="horizon-panel__foot">
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                SHA-256 verified · downloads stay in Aqua
+              </p>
+            </div>
+
+            <div class="callout">
+              <strong>No playtime or crash capture for Horizon.</strong>
+              <p>
+                Horizon runs outside Aqua, so those launches are not tracked like Java profiles.
+                Game folders and worlds are still one click away.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bedrock -->
+      <section class="section bedrock" id="bedrock">
+        <div class="wrap bedrock__inner">
+          <div class="bedrock__copy">
+            <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Bedrock Edition</p>
+            <h2 class="section__title reveal" style="--d: 60ms">Bedrock gets<br /> the same care.</h2>
+            <p class="section__lede reveal" style="--d: 120ms">
+              Aqua finds Minecraft for Windows and Minecraft Preview through the Microsoft Store,
+              launches them, and lists their worlds next to your Java saves.
+            </p>
+            <ul class="ticks reveal" style="--d: 180ms">
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>500+ builds in the catalogue.</b> Releases, beta, and preview channels, downloaded into Aqua's own folder.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Register or install when ready.</b> Windows deploys the build you picked, with a clear warning before anything moves.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Add-ons without the hunt.</b> Import .mcpack, .mcaddon, and .mcworld files, or browse add-on sites in a locked-down in-app view.</span>
+              </li>
+              <li>
+                <svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>
+                <span><b>Worlds where they live.</b> Read each edition's own <span class="mono">com.mojang</span> folder, with names and icons.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="bedrock__visual reveal" style="--d: 160ms">
+            <div class="bedrock-panel" aria-hidden="true">
+              <div class="bedrock-panel__head">
+                <span class="mock__title">Bedrock versions</span>
+                <span class="mock-seg">
+                  <span class="is-on">Release</span>
+                  <span>Beta</span>
+                  <span>Preview</span>
+                </span>
+              </div>
+              <div class="build">
+                <span class="build__ver">1.21.101</span>
+                <span class="build__meta">Release · MSIXVC</span>
+                <span class="mock-chip mock-chip--accent">Download</span>
+              </div>
+              <div class="build">
+                <span class="build__ver">1.21.100</span>
+                <span class="build__meta">Release · MSIXVC</span>
+                <span class="mock-chip">Download</span>
+              </div>
+              <div class="build">
+                <span class="build__ver">1.21.93</span>
+                <span class="build__meta">Release · APPX</span>
+                <span class="mock-chip">Download</span>
+              </div>
+              <div class="build build--active">
+                <span class="build__ver">1.21.90</span>
+                <span class="build__meta">Downloaded · registered</span>
+                <span class="mock-chip mock-chip--ghost">Installed</span>
+              </div>
+              <div class="build-progress">
+                <span class="build-progress__label"><span>Downloading 1.21.101</span><span>64%</span></span>
+                <span class="build-progress__track"><i></i></span>
+              </div>
+              <div class="bedrock-panel__foot">
+                <span><svg class="icon" aria-hidden="true"><use href="#i-world" /></svg>Worlds</span>
+                <span><svg class="icon" aria-hidden="true"><use href="#i-update" /></svg>Add-ons</span>
+                <span><svg class="icon" aria-hidden="true"><use href="#i-monitor" /></svg>Register build</span>
+              </div>
+            </div>
+            <div class="callout">
+              <strong>Windows only — and worth reading first.</strong>
+              <p>
+                Downloaded builds are unofficial copies of Store packages. Switching between UWP and
+                GDK builds can move Minecraft's data folder, so back up worlds before you register.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Roadmap -->
+      <section class="section" id="roadmap">
+        <div class="wrap">
+          <div class="section__head">
+            <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>The road ahead</p>
+            <h2 class="section__title reveal" style="--d: 60ms">Version 1.0 is<br /> a starting line.</h2>
+            <p class="section__lede reveal" style="--d: 120ms">
+              Aqua's roadmap is public and sequenced. These are the next packages — planned, not
+              shipped, so you know what is coming before it lands.
+            </p>
+          </div>
+
+          <div class="phases">
+            <article class="phase reveal">
+              <div class="phase__top">
+                <span class="phase__num">01</span>
+                <span class="mock-chip mock-chip--ghost">Planned</span>
+              </div>
+              <h3 class="phase__title">Trust &amp; recovery</h3>
+              <p class="phase__copy">When something breaks, explain it and offer a way out.</p>
+              <ul class="phase__list">
+                <li>Crash Guard: classified crashes with concrete next actions</li>
+                <li>Safe Mode that stages mods and restores them afterwards</li>
+                <li>Scheduled world backups with visible retention</li>
+                <li>Installation health checks and disk cleanup</li>
+              </ul>
+            </article>
+
+            <article class="phase reveal" style="--d: 80ms">
+              <div class="phase__top">
+                <span class="phase__num">02</span>
+                <span class="mock-chip mock-chip--ghost">Planned</span>
+              </div>
+              <h3 class="phase__title">Content depth</h3>
+              <p class="phase__copy">Make installed content legible, from one jar to a whole pack.</p>
+              <ul class="phase__list">
+                <li>Mod detail panes with changelogs and dependencies</li>
+                <li>Loader, version, category, and licence filters</li>
+                <li>Real metadata for hand-installed jars</li>
+                <li>First-class resource packs and datapacks</li>
+              </ul>
+            </article>
+
+            <article class="phase reveal" style="--d: 160ms">
+              <div class="phase__top">
+                <span class="phase__num">03</span>
+                <span class="mock-chip mock-chip--ghost">Later</span>
+              </div>
+              <h3 class="phase__title">Platform reach</h3>
+              <p class="phase__copy">Become part of the desktop, not just another window.</p>
+              <ul class="phase__list">
+                <li>Deeper shell integration and launch targets</li>
+                <li>Signed auto-updates once release hosting is settled</li>
+                <li>A stable, verifiable channel before any silent updates</li>
+              </ul>
+              <p class="phase__foot">Auto-update stays blocked until hosting and code signing are chosen.</p>
+            </article>
+          </div>
+
+          <p class="section__foot reveal">
+            <a class="text-link" href="https://github.com/Ch1nDev/Aqua/blob/main/ROADMAP.md" target="_blank" rel="noopener noreferrer">
+              Read the full roadmap on GitHub
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+            </a>
+          </p>
+        </div>
+      </section>
+
+      <!-- Get started -->
+      <section class="section get" id="get">
+        <div class="wrap">
+          <div class="get__head">
+            <div>
+              <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Get started</p>
+              <h2 class="section__title reveal" style="--d: 60ms">Clone it.<br /> Build it. Play.</h2>
+            </div>
+            <p class="get__lede reveal" style="--d: 120ms">
+              Aqua ships as source today. Clone the repository, install dependencies, and
+              <code>electron-builder</code> produces a Windows installer in <code>release/</code>.
+              No public download has been published yet.
+            </p>
+          </div>
+
+          <div class="steps" aria-label="How Aqua works">
+            <article class="step reveal">
+              <span class="step__num">01</span>
+              <h3 class="step__title">Build once</h3>
+              <p class="step__copy">Clone the repository and package a Windows installer in a few minutes.</p>
+            </article>
+            <article class="step reveal" style="--d: 80ms">
+              <span class="step__num">02</span>
+              <h3 class="step__title">Add your copies</h3>
+              <p class="step__copy">Aqua finds Java, Store Bedrock, and Horizon, then keeps each profile in one library.</p>
+            </article>
+            <article class="step reveal" style="--d: 160ms">
+              <span class="step__num">03</span>
+              <h3 class="step__title">Press Play</h3>
+              <p class="step__copy">Pick an installation and launch. Worlds, mods, backups, and logs stay on your disk.</p>
+            </article>
+          </div>
+
+          <div class="get__grid">
+            <div class="get__build reveal">
+              <div class="code-card">
+                <div class="code-card__bar">
+                  <span class="code-card__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span class="code-card__name">terminal</span>
+                  <button
+                    class="copy-btn"
+                    type="button"
+                    data-copy="git clone https://github.com/Ch1nDev/Aqua.git&#10;cd Aqua&#10;npm install&#10;npm run electron:build"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg>
+                    <span>Copy</span>
+                  </button>
+                </div>
+                <pre><code><span class="code-comment"># clone, install, and build a local installer</span>
+git clone https://github.com/Ch1nDev/Aqua.git
+cd Aqua
+npm install
+npm run electron:build</code></pre>
+              </div>
+              <ul class="reqs">
+                <li><span>Node</span> 22 or newer</li>
+                <li><span>Platform</span> Windows 10 / 11 (64-bit)</li>
+                <li><span>Network</span> for the manifest, game files, and runtimes</li>
+              </ul>
+            </div>
+
+            <div class="get__platforms">
+              <article class="platform reveal" style="--d: 60ms">
+                <span class="platform__icon">
+                  <svg class="icon" aria-hidden="true"><use href="#i-grid" /></svg>
+                </span>
+                <div class="platform__body">
+                  <h3>Windows 10 / 11 <span class="mock-chip mock-chip--accent">Primary</span></h3>
+                  <p>NSIS installer, per-user install, desktop shortcut. The platform every feature is tested on.</p>
+                </div>
+              </article>
+              <article class="platform reveal" style="--d: 120ms">
+                <span class="platform__icon">
+                  <svg class="icon" aria-hidden="true"><use href="#i-monitor" /></svg>
+                </span>
+                <div class="platform__body">
+                  <h3>macOS / Linux</h3>
+                  <p>DMG and AppImage targets are configured in the build, but these builds are not actively tested.</p>
+                </div>
+              </article>
+              <div class="get__actions reveal" style="--d: 180ms">
+                <a class="btn btn--primary" href="https://github.com/Ch1nDev/Aqua" target="_blank" rel="noopener noreferrer">
+                  <svg class="icon" aria-hidden="true"><use href="#i-github" /></svg>
+                  Open the repository
+                </a>
+                <a class="btn btn--ghost" href="https://github.com/Ch1nDev/Aqua#packaging" target="_blank" rel="noopener noreferrer">
+                  Read the build docs
+                  <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <div class="get__note reveal">
+            <strong>No public installer yet.</strong>
+            The repository has no published releases. Build from source with the commands above, or
+            watch the repository for the first signed build. Windows SmartScreen may warn until a
+            signing certificate exists.
+          </div>
+
+          <div class="get__risk reveal">
+            <span><svg class="icon" aria-hidden="true"><use href="#i-shield" /></svg>MIT licensed</span>
+            <span><svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>No account</span>
+            <span><svg class="icon" aria-hidden="true"><use href="#i-check" /></svg>Files stay local</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- FAQ -->
+      <section class="section faq" id="faq">
+        <div class="wrap faq__inner">
+          <div class="faq__intro">
+            <p class="eyebrow reveal"><span class="eyebrow__mark" aria-hidden="true"></span>Straight answers</p>
+            <h2 class="section__title reveal" style="--d: 60ms">The fine print,<br /> in plain sight.</h2>
+            <p class="faq__lede reveal" style="--d: 120ms">
+              Aqua is deliberately honest about what it does, what needs a workaround, and what is
+              still planned. If something is unclear, the repository's README goes deeper.
+            </p>
+            <a class="text-link reveal" style="--d: 180ms" href="https://github.com/Ch1nDev/Aqua#readme" target="_blank" rel="noopener noreferrer">
+              Read the README
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+            </a>
+          </div>
+
+          <div class="faq__list reveal" style="--d: 90ms">
+            <details class="faq__item">
+              <summary>
+                <span>Do I need a Microsoft account to use Aqua?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  No. Aqua starts with an offline profile: enter a player name and play singleplayer,
+                  LAN worlds, or modded setups. Microsoft sign-in exists in the backend but is hidden
+                  in the UI while the Azure application is pending Mojang approval. Offline profiles
+                  cannot join online-mode servers.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>Can I play Bedrock from Aqua?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  If Minecraft for Windows or Minecraft Preview is installed from the Microsoft Store,
+                  yes — Aqua detects it, launches it, and lists its worlds. The Bedrock version browser
+                  can download other builds into Aqua's folder. Those are unofficial copies of Store
+                  packages: APPX builds need Developer Mode, MSIXVC builds replace the running copy,
+                  and the Store may overwrite either on its next update. Back up worlds before switching.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>Does Aqua support Horizon?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  Yes. <strong>Installations → Horizon</strong> downloads Horizon's official Rust build,
+                  verifies its SHA-256, provisions Minecraft 26.3 and the Java runtime it pins, and runs
+                  Horizon's own preparer. Play starts the Rust client directly; the Horizon launcher is
+                  not involved. You still need your own Minecraft: Java Edition copy, and Horizon
+                  launches have no playtime or crash capture in Aqua.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>What happens when I delete an installation?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  Only the profile entry is removed. Its game directory — worlds, mods, resource packs,
+                  and downloaded files — stays on disk. Backups live in the launcher data folder, so
+                  they survive profile edits too.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>Where does Aqua keep my files?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  On Windows, everything lives under <code>%APPDATA%\Aqua Launcher</code>:
+                  <code>launcher.json</code> for settings and profiles, <code>minecraft/</code> for
+                  shared versions and assets, <code>instances/</code> for game directories,
+                  <code>runtime/</code> for Java, <code>logs/</code> for output, and
+                  <code>backups/</code> for world archives. Custom game folders are checked against
+                  drive roots and protected system locations.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>Does Aqua send telemetry?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  No telemetry, analytics, ads, or background uploads. Network calls are limited to
+                  what you ask for: Mojang manifests and game files, Java runtimes, Modrinth content,
+                  server pings, and — for Bedrock — the Store build catalogue.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>What about older versions and Java 8?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  Minecraft 1.12.2 and older need Java 8. Aqua will not substitute a newer runtime;
+                  install Java 8 once from <strong>Settings → Java → Official runtimes</strong> and
+                  those profiles pick it up automatically.
+                </p>
+              </div>
+            </details>
+
+            <details class="faq__item">
+              <summary>
+                <span>Does it run on macOS and Linux?</span>
+                <span class="faq__sign" aria-hidden="true"></span>
+              </summary>
+              <div class="faq__answer">
+                <p>
+                  The architecture is cross-platform and DMG/AppImage targets are configured, but
+                  Windows 10/11 is the primary and only actively tested platform. Bedrock support is
+                  Windows-only.
+                </p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- Final CTA -->
+      <section class="final" aria-labelledby="final-title">
+        <div class="wrap final__inner">
+          <p class="eyebrow"><span class="eyebrow__mark" aria-hidden="true"></span>Start here</p>
+          <h2 class="final__title" id="final-title">Every way to play.<br />One launcher.</h2>
+          <p class="final__copy">
+            Build Aqua from source, or follow the repository for the first signed Windows release.
+            Your worlds stay on your disk either way.
+          </p>
+          <div class="final__actions">
+            <a class="btn btn--primary" href="#get">
+              <svg class="icon" aria-hidden="true"><use href="#i-download" /></svg>
+              Get Aqua
+            </a>
+            <a class="final__source" href="https://github.com/Ch1nDev/Aqua" target="_blank" rel="noopener noreferrer">
+              View source on GitHub
+              <svg class="icon" aria-hidden="true"><use href="#i-arrow-up" /></svg>
+            </a>
+          </div>
+          <p class="final__risk">No account · No telemetry · MIT licensed</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <div class="footer__top">
+          <div class="footer__brand">
+            <a class="brand" href="#top" aria-label="Back to top">
+              <span class="brand__tile"><img src="assets/icon.png" alt="" width="30" height="30" /></span>
+              <span class="brand__text">
+                <span class="brand__name">AQUA</span>
+                <span class="brand__sub">LAUNCHER</span>
+              </span>
+            </a>
+            <p>Java, Bedrock and Horizon.<br />Your worlds stay yours.</p>
+            <div class="footer__badges">
+              <span>Electron</span>
+              <span>React</span>
+              <span>TypeScript</span>
+              <span>Vite</span>
+            </div>
+          </div>
+
+          <div class="footer__cols">
+            <div class="footer__col">
+              <h3>Product</h3>
+              <a href="#features">Features</a>
+              <a href="#tour">Screenshots</a>
+              <a href="#horizon">Horizon</a>
+              <a href="#bedrock">Bedrock</a>
+              <a href="#get">Get Aqua</a>
+            </div>
+            <div class="footer__col">
+              <h3>Project</h3>
+              <a href="https://github.com/Ch1nDev/Aqua" target="_blank" rel="noopener noreferrer">GitHub</a>
+              <a href="https://github.com/Ch1nDev/Aqua#readme" target="_blank" rel="noopener noreferrer">README</a>
+              <a href="https://github.com/Ch1nDev/Aqua/blob/main/ROADMAP.md" target="_blank" rel="noopener noreferrer">Roadmap</a>
+              <a href="https://github.com/Ch1nDev/Aqua/blob/main/package.json" target="_blank" rel="noopener noreferrer">Licence (MIT)</a>
+            </div>
+            <div class="footer__col">
+              <h3>Good to know</h3>
+              <a href="#faq">FAQ</a>
+              <a href="https://github.com/Ch1nDev/Aqua#data-locations" target="_blank" rel="noopener noreferrer">Data locations</a>
+              <a href="https://github.com/Ch1nDev/Aqua#known-limitations" target="_blank" rel="noopener noreferrer">Known limitations</a>
+              <a href="privacy.html">Privacy</a>
+              <a href="terms.html">Terms</a>
+              <a href="#top">Back to top ↑</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="footer__bottom">
+          <p>© <span data-year>2026</span> Aqua Launcher. Not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang Studios.</p>
+          <p class="footer__build">Built with Electron, React, TypeScript &amp; Vite.</p>
+        </div>
+      </div>
+    </footer>
+
+    <dialog class="lightbox" data-lightbox-dialog aria-label="Screenshot preview">
+      <div class="lightbox__inner">
+        <button class="lightbox__close" type="button" data-lightbox-close aria-label="Close preview">
+          <svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+        </button>
+        <img data-lightbox-img alt="" />
+        <p class="lightbox__caption" data-lightbox-caption></p>
+      </div>
+    </dialog>
+
+    <span class="visually-hidden" role="status" aria-live="polite" data-copy-status></span>
+    <script src="script.js" defer></script>
+  </body>
+</html>

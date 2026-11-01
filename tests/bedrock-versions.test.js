@@ -364,7 +364,7 @@ test('MSIXVC builds are saved as files and cannot be registered', async () => {
   assert.ok((await fsp.stat(path.join(folder, 'package.msixvc'))).isFile())
   const library = await service.library()
   assert.equal(library.get('1.21.130.1').layout, 'msixvc')
-  await assert.rejects(() => service.registerCommand('1.21.130.1'), /Microsoft Store/)
+  await assert.rejects(() => service.registerCommand('1.21.130.1'), /Use Install build/)
 })
 
 test('downloading an unknown or unsafe version is refused', async () => {
@@ -452,4 +452,118 @@ test('registration scripts are written next to the build', async () => {
   const manifest = path.join(folder, 'AppxManifest.xml')
   const { command } = await service.registerCommand('1.21.114.1')
   assert.equal(command, `Add-AppxPackage -Path "${manifest}" -Register -ForceApplicationShutdown`)
+})
+
+/**
+ * MSIXVC builds are encrypted Store packages: Windows only takes them by
+ * installing, which replaces the copy it is running. These tests pin the command
+ * that does that, and the refusal paths around it.
+ */
+function msixvcCatalog(versions) {
+  return async (url) => {
+    if (url.includes('mc-w10-versiondb')) return { ok: true, text: async () => '[]' }
+    if (url.includes('GdkLinks')) {
+      const release = {}
+      for (const version of versions) release[version] = [`https://example.test/${version}.msixvc`]
+      return { ok: true, text: async () => JSON.stringify({ release }) }
+    }
+    throw new Error(`unexpected ${url}`)
+  }
+}
+
+async function seedDownloadedMsixvc(paths, version) {
+  const folder = path.join(paths.bedrockVersionsRoot, version)
+  await fsp.mkdir(folder, { recursive: true })
+  await fsp.writeFile(path.join(folder, 'package.msixvc'), 'build')
+  return folder
+}
+
+test('a downloaded MSIXVC build installs with Add-AppxPackage', async () => {
+  const calls = []
+  let running = null
+  const { service, paths } = await createService({
+    fetchImpl: msixvcCatalog(['1.21.130.1']),
+    bedrockService: {
+      status: async () => ({
+        editions: running
+          ? [{ id: 'bedrock', name: 'Minecraft for Windows', version: running, packageVersion: running, installLocation: 'C:\XboxGames\Minecraft for Windows\Content' }]
+          : [],
+      }),
+    },
+  })
+  const folder = await seedDownloadedMsixvc(paths, '1.21.130.1')
+  service.run = async (_file, args) => {
+    calls.push(args.join(' '))
+    running = '1.21.130.1'
+    return { ok: true, stdout: '', stderr: '' }
+  }
+
+  const result = await service.install('1.21.130.1')
+  assert.equal(result.installedVersion, '1.21.130.1')
+  assert.equal(result.replacedVersion, null)
+  assert.equal(result.forcedDowngrade, false)
+  const command = calls.find((call) => call.includes('Add-AppxPackage'))
+  assert.equal(command, `-NoProfile -NonInteractive -Command $ErrorActionPreference = 'Stop'; Add-AppxPackage -Path "${path.join(folder, 'package.msixvc')}"`)
+  assert.equal(result.command, `Add-AppxPackage -Path "${path.join(folder, 'package.msixvc')}"`)
+})
+
+test('installing an older build asks Windows to replace the newer one', async () => {
+  const calls = []
+  let running = '1.26.12.2'
+  const { service, paths } = await createService({
+    fetchImpl: msixvcCatalog(['1.21.130.1']),
+    bedrockService: {
+      status: async () => ({
+        editions: [{ id: 'bedrock', name: 'Minecraft for Windows', version: running, packageVersion: running, installLocation: null }],
+      }),
+    },
+  })
+  await seedDownloadedMsixvc(paths, '1.21.130.1')
+  service.run = async (_file, args) => {
+    calls.push(args.join(' '))
+    running = '1.21.130.1'
+    return { ok: true, stdout: '', stderr: '' }
+  }
+
+  const result = await service.install('1.21.130.1')
+  assert.equal(result.forcedDowngrade, true)
+  assert.equal(result.replacedVersion, '1.26.12.2')
+  assert.match(result.command, /-ForceUpdateFromAnyVersion$/)
+})
+
+test('a refused install reports what Windows said and leaves the old copy alone', async () => {
+  const { service, paths } = await createService({
+    fetchImpl: msixvcCatalog(['1.21.130.1']),
+    bedrockService: {
+      status: async () => ({
+        editions: [{ id: 'bedrock', name: 'Minecraft for Windows', version: '1.26.12.2', packageVersion: '1.26.12.2', installLocation: null }],
+      }),
+    },
+  })
+  await seedDownloadedMsixvc(paths, '1.21.130.1')
+  service.run = async () => ({
+    ok: false,
+    stdout: '',
+    stderr: 'Add-AppxPackage: Deployment failed with HRESULT: 0x80073D02, because the package is in use.',
+  })
+
+  await assert.rejects(() => service.install('1.21.130.1'), /0x80073D02/)
+})
+
+test('installing refuses APPX builds and builds that were never downloaded', async () => {
+  const { service, paths } = await createService({
+    fetchImpl: async (url) => {
+      if (url.includes('mc-w10-versiondb')) {
+        return { ok: true, text: async () => JSON.stringify([['1.21.114.1', UPDATE_ID, 0]]) }
+      }
+      if (url.includes('GdkLinks')) return { ok: true, text: async () => '{}' }
+      throw new Error(`unexpected ${url}`)
+    },
+  })
+  // The APPX folder is already unpacked, so only the format stops the install.
+  await fsp.mkdir(path.join(paths.bedrockVersionsRoot, '1.21.114.1'), { recursive: true })
+  await fsp.writeFile(path.join(paths.bedrockVersionsRoot, '1.21.114.1', 'AppxManifest.xml'), '<Package />')
+
+  await assert.rejects(() => service.install('1.21.114.1'), /Register it instead/)
+  await assert.rejects(() => service.install('1.21.130.1'), /Download that version first/)
 })

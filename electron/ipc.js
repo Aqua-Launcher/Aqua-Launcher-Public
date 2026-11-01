@@ -48,12 +48,14 @@ export function registerIpc({
   artworkService,
   loaderService,
   modrinthService,
+  modRetargetService,
   minecraftSettingsService,
   worldsService,
   serverService,
   bedrockService,
   bedrockVersionsService,
   bedrockAddonsService,
+  horizonService,
   installationService,
   accountManager,
   javaService,
@@ -392,6 +394,41 @@ export function registerIpc({
     return result
   })
 
+  ipcMain.handle('mods:retargetInfo', async (_event, { installationId, filename } = {}) => {
+    return modRetargetService.inspect(
+      requireInstallation(installationId),
+      requireString(filename, 'Mod file', 260),
+    )
+  })
+
+  ipcMain.handle('mods:retarget', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const result = await modRetargetService.convert(installation, requireString(filename, 'Mod file', 260))
+    await store.addActivity({
+      type: 'install',
+      title: `Converted ${result.filename}`,
+      detail: `Minecraft ${result.targetVersion} · ${installation.name}`,
+      installationId: installation.id,
+      status: 'success',
+    })
+    emitActivity()
+    return result
+  })
+
+  ipcMain.handle('mods:retargetUndo', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const result = await modRetargetService.undo(installation, requireString(filename, 'Mod file', 260))
+    await store.addActivity({
+      type: 'install',
+      title: `Restored ${result.filename}`,
+      detail: `Original mod file restored in ${installation.name}`,
+      installationId: installation.id,
+      status: 'success',
+    })
+    emitActivity()
+    return result
+  })
+
   ipcMain.handle('mods:openFolder', async (_event, { installationId, contentType = 'mod' } = {}) => {
     const installation = requireInstallation(installationId)
     const directory =
@@ -649,6 +686,44 @@ export function registerIpc({
       ignoreMissingDependencies: Boolean(ignoreMissingDependencies),
     })
   })
+  ipcMain.handle('bedrock:installVersion', async (_event, { version } = {}) => {
+    const result = await bedrockVersionsService.install(requireVersion(version))
+    await store.addActivity({
+      type: 'install',
+      title: `Installed Bedrock ${result.installedVersion || result.version}`,
+      detail: result.replacedVersion
+        ? `Windows replaced Minecraft ${result.replacedVersion}`
+        : 'Windows installed the downloaded build',
+      installationId: null,
+      status: 'success',
+    })
+    emitActivity()
+    return result
+  })
+  ipcMain.handle('horizon:status', async (_event, { force = false } = {}) => {
+    return horizonService.status({ force: Boolean(force) })
+  })
+  ipcMain.handle('horizon:releases', async (_event, { force = false } = {}) => {
+    return horizonService.listReleases({ force: Boolean(force) })
+  })
+  ipcMain.handle('horizon:install', async (_event, { tag = null } = {}) => {
+    return horizonService.install(requireString(tag, 'Horizon release', 32))
+  })
+  ipcMain.handle('horizon:cancelInstall', async () => {
+    return horizonService.cancelInstall()
+  })
+  ipcMain.handle('horizon:launch', async (_event, { version = null } = {}) => {
+    if (version != null && typeof version !== 'string') throw new Error('That Horizon build is invalid.')
+    return horizonService.launch(version ? requireString(version, 'Horizon build', 80) : null)
+  })
+  ipcMain.handle('horizon:openFolder', async (_event, { kind = 'game', version = null } = {}) => {
+    if (version != null && typeof version !== 'string') throw new Error('That Horizon build is invalid.')
+    return horizonService.openFolder(
+      requireString(kind, 'Horizon folder', 32),
+      version ? requireString(version, 'Horizon build', 80) : null,
+    )
+  })
+
   ipcMain.handle('game:getState', async () => gameManager.getState())
 
   ipcMain.handle('logs:list', async () => logService.list())

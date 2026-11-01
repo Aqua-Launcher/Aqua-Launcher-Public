@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Boxes,
+  Cpu,
   Gem,
   Check,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   Download,
   FolderOpen,
   Gamepad2,
+  HardDrive,
   Layers,
   Pencil,
   Play,
@@ -24,13 +26,15 @@ import { api, getErrorMessage } from '../lib/api'
 import { formatBytes, formatEta, formatPlaytime, relativeTime, shortPath } from '../lib/format'
 import { loaderLabel } from '../lib/loaders'
 import { useLauncher } from '../state/LauncherProvider'
-import type { DownloadJob, Installation } from '../lib/types'
+import type { DownloadJob, HorizonStatus, Installation } from '../lib/types'
 import { PackIcon } from '../components/brand/Brand'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
 import { Button, EmptyState, IconButton, ProgressBar, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
+import { InstallBedrockDialog } from '../components/bedrock/InstallBedrockDialog'
 import { RegisterBedrockDialog } from '../components/bedrock/RegisterBedrockDialog'
+import { HorizonPanel } from '../components/horizon/HorizonPanel'
 
 type Filter = 'all' | 'installed' | 'missing' | 'release' | 'snapshot'
 
@@ -72,14 +76,20 @@ export function InstallationsPage() {
     launchBedrock,
     bedrockTarget,
     selectBedrockTarget,
+    horizonTarget,
     bedrockLibrary,
     registerBedrockVersion,
+    installBedrockVersion,
     removeBedrockVersion,
     openBedrockVersionFolder,
     navigate,
   } = useLauncher()
 
-  const [editionTab, setEditionTab] = useState<'java' | 'bedrock'>('java')
+  const [editionTab, setEditionTab] = useState<'java' | 'bedrock' | 'horizon'>('java')
+  const [horizon, setHorizon] = useState<HorizonStatus | null>(null)
+  const [horizonLoading, setHorizonLoading] = useState(false)
+  const [horizonError, setHorizonError] = useState<string | null>(null)
+  const horizonRequest = useRef(0)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null)
@@ -87,25 +97,45 @@ export function InstallationsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [launchingEditionId, setLaunchingEditionId] = useState<string | null>(null)
   const [registerTarget, setRegisterTarget] = useState<string | null>(null)
+  const [installTarget, setInstallTarget] = useState<string | null>(null)
+  const javaIsPlayTarget = !bedrockTarget && !horizonTarget
+
+  const targetEdition = (editionId: string) => {
+    selectBedrockTarget(editionId)
+    pushToast({
+      level: 'info',
+      title: 'Bedrock is now the Play target',
+      message: 'Press Play on the dashboard, or Shift-click Play here to launch it now.',
+    })
+  }
 
   const launchEdition = async (editionId: string) => {
     setLaunchingEditionId(editionId)
     try {
-      // Launching also points the dashboard's Play button at this edition.
-      await launchBedrock(editionId)
+      // Shift-click is the shortcut that starts the game without changing the target.
+      await launchBedrock(editionId, null, { keepTarget: true })
     } finally {
       setLaunchingEditionId(null)
     }
   }
 
-  const useEditionForPlay = (editionId: string) => {
-    selectBedrockTarget(editionId)
-    pushToast({
-      level: 'info',
-      title: 'Bedrock is now the Play target',
-      message: 'Press Play on the dashboard to launch this edition.',
-    })
-  }
+  const refreshHorizon = useCallback(async (force = false) => {
+    const request = ++horizonRequest.current
+    setHorizonLoading(true)
+    setHorizonError(null)
+    try {
+      const result = await api.horizon.status({ force })
+      if (horizonRequest.current === request) setHorizon(result)
+    } catch (error) {
+      if (horizonRequest.current === request) setHorizonError(getErrorMessage(error))
+    } finally {
+      if (horizonRequest.current === request) setHorizonLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshHorizon(false)
+  }, [refreshHorizon])
 
   const openEditionFolder = async (editionId: string) => {
     try {
@@ -116,12 +146,14 @@ export function InstallationsPage() {
   }
 
   // A registered build also sits in the download folder: it is one thing, not two.
+  // Windows reports install locations with a trailing separator; downloaded folders have none.
+  const folderKey = (value: string) => value.replace(/[\\/]+$/, '').toLowerCase()
   const registeredFolders = useMemo(
-    () => new Set((bedrock?.editions || []).map((edition) => (edition.installLocation || '').toLowerCase())),
+    () => new Set((bedrock?.editions || []).map((edition) => folderKey(edition.installLocation || ''))),
     [bedrock],
   )
   const extraBuilds = useMemo(
-    () => bedrockLibrary.filter((entry) => !registeredFolders.has(entry.directory.toLowerCase())),
+    () => bedrockLibrary.filter((entry) => !registeredFolders.has(folderKey(entry.directory))),
     [bedrockLibrary, registeredFolders],
   )
 
@@ -174,9 +206,16 @@ export function InstallationsPage() {
     }
   }
 
-  const selectInstallation = async (id: string) => {
+  const selectInstallation = async (id: string, announce = false) => {
     try {
       await setActiveInstallation(id)
+      if (announce) {
+        pushToast({
+          level: 'info',
+          title: 'Java is now the Play target',
+          message: 'Press Play on the dashboard, or Shift-click Play here to launch it now.',
+        })
+      }
     } catch (error) {
       pushToast({ level: 'error', title: 'Could not select installation', message: getErrorMessage(error) })
     }
@@ -188,8 +227,10 @@ export function InstallationsPage() {
         title="Installations"
         subtitle={
           editionTab === 'java'
-            ? 'Each profile keeps its own version, game folder, and launch settings.'
-            : 'Bedrock editions installed for this Windows account, plus builds downloaded here.'
+            ? 'Each profile keeps its own version and game folder. Play sets the dashboard target; Shift-click Play to launch it now.'
+            : editionTab === 'bedrock'
+              ? 'Bedrock editions installed for this Windows account, plus builds downloaded here. Play sets the dashboard target; Shift-click Play to launch it now.'
+              : 'Horizon Rust builds installed, prepared, and launched by Aqua. Play sets the dashboard target; Shift-click Play to launch it now.'
         }
         actions={
           editionTab === 'java' ? (
@@ -200,9 +241,17 @@ export function InstallationsPage() {
             >
               New installation
             </Button>
-          ) : (
+          ) : editionTab === 'bedrock' ? (
             <Button icon={<Download />} onClick={() => navigate('versions')}>
               Browse versions
+            </Button>
+          ) : (
+            <Button
+              icon={<RefreshCw className={horizonLoading ? 'spin' : undefined} />}
+              onClick={() => void refreshHorizon(true)}
+              loading={horizonLoading}
+            >
+              Refresh
             </Button>
           )
         }
@@ -228,6 +277,16 @@ export function InstallationsPage() {
         >
           <Gem /> Bedrock Edition
           <span className="edition-switch__count">{(bedrock?.editions.length ?? 0) + extraBuilds.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={editionTab === 'horizon'}
+          className={editionTab === 'horizon' ? 'is-active' : undefined}
+          onClick={() => setEditionTab('horizon')}
+        >
+          <Cpu /> Horizon
+          <span className="edition-switch__count">{horizon?.builds.length ?? 0}</span>
         </button>
       </div>
 
@@ -273,7 +332,7 @@ export function InstallationsPage() {
           {filtered.length} of {installations.length}
         </span>
       </div>
-      ) : (
+      ) : editionTab === 'bedrock' ? (
         <div className="page-toolbar">
           <span className="page-toolbar__count">
             {bedrock?.editions.length ?? 0} installed · {extraBuilds.length} downloaded
@@ -288,7 +347,32 @@ export function InstallationsPage() {
             Refresh
           </Button>
         </div>
+      ) : (
+        <div className="page-toolbar">
+          <span className="page-toolbar__count">
+            {horizon?.builds.length ?? 0} build{horizon?.builds.length === 1 ? '' : 's'} installed ·{' '}
+            {horizon?.worlds ?? 0} world{horizon?.worlds === 1 ? '' : 's'}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<RefreshCw className={horizonLoading ? 'spin' : undefined} />}
+            onClick={() => void refreshHorizon(true)}
+            disabled={horizonLoading}
+          >
+            Refresh
+          </Button>
+        </div>
       )}
+
+      {editionTab === 'horizon' ? (
+        <HorizonPanel
+          status={horizon}
+          loading={horizonLoading}
+          error={horizonError}
+          onRefresh={() => void refreshHorizon(true)}
+        />
+      ) : null}
 
       {editionTab === 'bedrock' ? (
         <>
@@ -344,7 +428,11 @@ export function InstallationsPage() {
                     variant="primary"
                     icon={<Play />}
                     loading={launchingEditionId === edition.id}
-                    onClick={() => void launchEdition(edition.id)}
+                    title="Set as the Play target · Shift-click to launch now"
+                    onClick={(event) => {
+                      if (event.shiftKey) void launchEdition(edition.id)
+                      else targetEdition(edition.id)
+                    }}
                   >
                     Play
                   </Button>
@@ -354,15 +442,6 @@ export function InstallationsPage() {
                   <Button icon={<Layers />} onClick={() => navigate('worlds')}>
                     Worlds
                   </Button>
-                  {bedrockTarget?.id === edition.id ? (
-                    <Button icon={<Check />} disabled>
-                      Used by Play
-                    </Button>
-                  ) : (
-                    <Button icon={<Play />} onClick={() => useEditionForPlay(edition.id)}>
-                      Use for Play
-                    </Button>
-                  )}
                 </div>
               </article>
             ))}
@@ -395,8 +474,8 @@ export function InstallationsPage() {
             <div>
               <h2 className="panel-head__title">Bedrock builds downloaded here</h2>
               <p className="panel-head__subtitle">
-                Unpacked in the launcher's own folder. Registering one makes Windows run that build instead of the Store
-                copy.
+                Kept in the launcher's own folder. Registering an older build makes Windows run it in place; newer Store
+                packages are handed to Windows, which installs them over the current copy.
               </p>
             </div>
             <button type="button" className="link-button" onClick={() => navigate('versions')}>
@@ -404,13 +483,15 @@ export function InstallationsPage() {
             </button>
           </div>
           {bedrockLibrary.map((entry) => {
-            const linked = registeredFolders.has(entry.directory.toLowerCase())
+            const linked = registeredFolders.has(folderKey(entry.directory))
+            const installed = Boolean(bedrock?.editions[0]?.version) && bedrock?.editions[0]?.version === entry.version
             return (
               <div className="bedrock-download-row" key={entry.version}>
                 <div className="grow">
                   <span className="bedrock-download-row__version">
                     Bedrock {entry.version}
                     {linked ? <span className="bedrock-download-row__flag">Registered</span> : null}
+                    {!linked && installed ? <span className="bedrock-download-row__flag">Installed</span> : null}
                   </span>
                   <span className="bedrock-download-row__meta">
                     {formatBytes(entry.sizeBytes)}
@@ -418,14 +499,27 @@ export function InstallationsPage() {
                       ? ' · this folder is the installed Minecraft'
                       : entry.layout === 'appx'
                         ? ' · ready to register'
-                        : ' · MSIXVC, installs only from the Store'}
+                        : installed
+                          ? ' · installed through Windows'
+                          : ' · Store package, ready to install'}
                   </span>
                 </div>
-                {entry.layout === 'appx' && !linked ? (
-                  <Button size="sm" variant="primary" icon={<CheckCircle2 />} onClick={() => setRegisterTarget(entry.version)}>
-                    Register build
+                {entry.layout === 'appx' ? (
+                  linked ? null : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={<CheckCircle2 />}
+                      onClick={() => setRegisterTarget(entry.version)}
+                    >
+                      Register build
+                    </Button>
+                  )
+                ) : installed ? null : (
+                  <Button size="sm" variant="primary" icon={<HardDrive />} onClick={() => setInstallTarget(entry.version)}>
+                    Install build
                   </Button>
-                ) : null}
+                )}
                 <Button size="sm" icon={<FolderOpen />} onClick={() => void openBedrockVersionFolder(entry.version)}>
                   Open folder
                 </Button>
@@ -452,6 +546,17 @@ export function InstallationsPage() {
           const version = registerTarget
           setRegisterTarget(null)
           if (version) void registerBedrockVersion(version, options)
+        }}
+      />
+
+      <InstallBedrockDialog
+        version={installTarget}
+        installedVersion={bedrock?.editions[0]?.version || null}
+        onCancel={() => setInstallTarget(null)}
+        onConfirm={() => {
+          const version = installTarget
+          setInstallTarget(null)
+          if (version) void installBedrockVersion(version)
         }}
       />
 
@@ -511,8 +616,6 @@ export function InstallationsPage() {
             const isPreparing =
               (game.status === 'preparing' && game.installationId === installation.id) ||
               launchingId === installation.id
-            const isOtherGameRunning =
-              (game.status === 'running' || game.status === 'preparing') && game.installationId !== installation.id
             return (
               <article
                 key={installation.id}
@@ -523,9 +626,9 @@ export function InstallationsPage() {
                     <button
                       type="button"
                       className={cx('installation-card__select', installation.isActive && 'is-on')}
-                      aria-label={installation.isActive ? 'Selected for launch' : 'Select for launch'}
+                      aria-label={installation.isActive ? 'Default Java installation' : 'Set as default Java installation'}
                       aria-pressed={installation.isActive}
-                      title={installation.isActive ? 'Selected for launch' : 'Select for launch'}
+                      title={installation.isActive ? 'Default Java installation' : 'Set as default Java installation'}
                       onClick={() => void selectInstallation(installation.id)}
                     >
                       {installation.isActive ? <CheckCircle2 /> : <Circle />}
@@ -540,6 +643,11 @@ export function InstallationsPage() {
                     <div className="installation-card__titles">
                       <div className="installation-card__name-row">
                         <h2 className="installation-card__name">{installation.name}</h2>
+                        {installation.isActive && javaIsPlayTarget ? (
+                          <span className="installation-card__target">
+                            <CheckCircle2 /> Play target
+                          </span>
+                        ) : null}
                       </div>
                       <div className="installation-card__version-row">
                         <span className="installation-card__version">
@@ -570,7 +678,7 @@ export function InstallationsPage() {
                         onSelect: () => void openInstallationFolder(installation.id),
                       },
                       {
-                        label: 'Set as selected',
+                        label: 'Set as default Java installation',
                         icon: <Check />,
                         disabled: installation.isActive,
                         onSelect: () => void selectInstallation(installation.id),
@@ -677,8 +785,11 @@ export function InstallationsPage() {
                       size="sm"
                       variant="primary"
                       icon={<Play />}
-                      onClick={() => void play(installation.id)}
-                      disabled={isOtherGameRunning}
+                      title="Set as the Play target · Shift-click to launch now"
+                      onClick={(event) => {
+                        if (event.shiftKey) void play(installation.id, { keepTarget: true })
+                        else void selectInstallation(installation.id, true)
+                      }}
                     >
                       Play
                     </Button>

@@ -33,6 +33,9 @@ const EXTERNAL_HOSTS = [
   'crafatar.com',
   'mc-heads.net',
   'apps.microsoft.com',
+  // Horizon (Minecraft: Java Edition rewritten in Rust) and its downloads.
+  'playhorizon.dev',
+  'github.com',
   // Bedrock add-on catalogues the launcher's in-app browser links out to.
   'mcpedl.com',
   'mcpeaddons.com',

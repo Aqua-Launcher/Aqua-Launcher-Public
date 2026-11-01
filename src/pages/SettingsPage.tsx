@@ -13,8 +13,6 @@ import {
   HardDrive,
   Info,
   Layers,
-  Lock,
-  LockOpen,
   MemoryStick,
   Monitor,
   Palette,
@@ -31,7 +29,7 @@ import { api, getErrorMessage } from '../lib/api'
 import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
 import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { javaPurpose } from '../lib/java-info'
-import { resolveChunkyChrome, resolveRounding, useLauncher } from '../state/LauncherProvider'
+import { useLauncher } from '../state/LauncherProvider'
 import type {
   JavaRuntimeOption,
   MinecraftSettingsStatus,
@@ -40,21 +38,19 @@ import type {
 } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { StoragePanel } from '../components/settings/StoragePanel'
-import { ThemeStudio } from '../components/theme/ThemeStudio'
 import {
   Badge,
   Button,
   CopyButton,
   Field,
   FieldRow,
-  IconButton,
   Spinner,
   Switch,
   cx,
 } from '../components/ui/primitives'
 
 const SECTIONS = [
-  { id: 'settings-appearance', label: 'Appearance', icon: Palette },
+  { id: 'settings-appearance', label: 'Display', icon: Palette },
   { id: 'settings-java', label: 'Java', icon: Coffee },
   { id: 'settings-memory', label: 'Memory', icon: MemoryStick },
   { id: 'settings-minecraft', label: 'Minecraft settings', icon: Gamepad2 },
@@ -187,23 +183,6 @@ function SettingsWorkspace({
   const previewScale = (value: number) => {
     update('uiScale', value)
     void api.windowControls.setZoom(value)
-  }
-
-  const rounding = resolveRounding(form)
-  const chunkyChrome = resolveChunkyChrome(form)
-
-  const toggleRoundingLink = () => {
-    // Unlinking hands the current look to the standalone toggle; linking back
-    // snaps rounding to whatever the interface font implies.
-    update('roundedCornersLinked', !form.roundedCornersLinked)
-    update('roundedCorners', form.roundedCornersLinked ? rounding : form.fontFamily === 'quicksand')
-  }
-
-  const toggleChunkyChromeLink = () => {
-    // Same hand-off: unlinking keeps the look that is on screen, linking back
-    // snaps the 3D effect to whatever the interface font implies.
-    update('chunkyChromeLinked', !form.chunkyChromeLinked)
-    update('chunkyChrome', form.chunkyChromeLinked ? chunkyChrome : form.fontFamily === 'minecraft')
   }
 
   useEffect(() => {
@@ -460,151 +439,10 @@ function SettingsWorkspace({
 
           <section className="settings-section" id="settings-appearance">
             <div className="settings-section__head">
-              <h2>Appearance</h2>
-              <p>Theme, accent colour, custom block surfaces, motion, and the dashboard illustration.</p>
+              <h2>Display</h2>
+              <p>Text size, motion, and the dashboard illustration.</p>
             </div>
             <div className="settings-card">
-              <div className="settings-field-block">
-                <span className="field__label">Theme</span>
-                <div className="theme-grid" role="radiogroup" aria-label="Launcher theme">
-                  {(
-                    [
-                      ['midnight', 'Midnight', 'Deep blue-black interface'],
-                      ['slate', 'Slate', 'Cool charcoal with soft contrast'],
-                    ] as const
-                  ).map(([theme, label, description]) => (
-                    <button
-                      key={theme}
-                      type="button"
-                      role="radio"
-                      aria-checked={form.theme === theme}
-                      className={cx('theme-card', form.theme === theme && 'is-selected')}
-                      onClick={() => update('theme', theme)}
-                    >
-                      <span className={cx('theme-card__preview', `theme-card__preview--${theme}`)}>
-                        <span className="theme-card__sidebar" />
-                        <span className="theme-card__body">
-                          <span />
-                          <span />
-                          <span />
-                        </span>
-                      </span>
-                      <span className="theme-card__copy">
-                        <span>{label}</span>
-                        <small>{description}</small>
-                      </span>
-                      {form.theme === theme ? (
-                        <span className="theme-card__check">
-                          <Check />
-                        </span>
-                      ) : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="settings-field-block">
-                <span className="field__label">Accent</span>
-                <div className="accent-row" role="radiogroup" aria-label="Accent color">
-                  {(
-                    [
-                      ['aqua', 'Aqua', '#5cc8e8'],
-                      ['ocean', 'Ocean', '#4f9fe8'],
-                      ['steel', 'Steel', '#93aecb'],
-                    ] as const
-                  ).map(([accent, label, color]) => (
-                    <button
-                      key={accent}
-                      type="button"
-                      role="radio"
-                      aria-checked={form.accent === accent}
-                      className={cx('accent-choice', form.accent === accent && 'is-selected')}
-                      onClick={() => update('accent', accent)}
-                      title={label}
-                    >
-                      <span className="accent-choice__dot" style={{ background: color }} />
-                      {label}
-                      {form.accent === accent ? <Check /> : null}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <FieldRow
-                title="Interface font"
-                description="Quicksand is a smooth, easy-read font for body text. Minecraft keeps the classic pixel look."
-              >
-                <div className="segmented" role="radiogroup" aria-label="Interface font">
-                  {(
-                    [
-                      ['minecraft', 'Minecraft', 'font-preview--pixel'],
-                      ['quicksand', 'Quicksand', 'font-preview--quicksand'],
-                    ] as const
-                  ).map(([font, label, previewClass]) => (
-                    <button
-                      key={font}
-                      type="button"
-                      role="radio"
-                      aria-checked={form.fontFamily === font}
-                      className={cx(form.fontFamily === font && 'is-active')}
-                      onClick={() => update('fontFamily', font)}
-                    >
-                      <span className={previewClass}>{label}</span>
-                    </button>
-                  ))}
-                </div>
-              </FieldRow>
-
-              {/* Rounding and 3D Effects are both linked to the interface font,
-                  so their switches share a single row. */}
-              <div className="choice-row choice-row--split">
-                <FieldRow title="Rounding">
-                  <IconButton
-                    size="sm"
-                    className={cx(form.roundedCornersLinked && 'icon-btn--on')}
-                    aria-pressed={form.roundedCornersLinked}
-                    label={
-                      form.roundedCornersLinked
-                        ? 'Unlink rounding from the interface font'
-                        : 'Link rounding to the interface font'
-                    }
-                    onClick={toggleRoundingLink}
-                  >
-                    {form.roundedCornersLinked ? <Lock /> : <LockOpen />}
-                  </IconButton>
-                  <Switch
-                    checked={rounding}
-                    disabled={form.roundedCornersLinked}
-                    onChange={(value) => update('roundedCorners', value)}
-                    label="Rounding"
-                  />
-                </FieldRow>
-
-                <span className="choice-row__rule" aria-hidden="true" />
-
-                <FieldRow title="3D Effects">
-                  <IconButton
-                    size="sm"
-                    className={cx(form.chunkyChromeLinked && 'icon-btn--on')}
-                    aria-pressed={form.chunkyChromeLinked}
-                    label={
-                      form.chunkyChromeLinked
-                        ? 'Unlink 3D Effects from the interface font'
-                        : 'Link 3D Effects to the interface font'
-                    }
-                    onClick={toggleChunkyChromeLink}
-                  >
-                    {form.chunkyChromeLinked ? <Lock /> : <LockOpen />}
-                  </IconButton>
-                  <Switch
-                    checked={chunkyChrome}
-                    disabled={form.chunkyChromeLinked}
-                    onChange={(value) => update('chunkyChrome', value)}
-                    label="3D Effects"
-                  />
-                </FieldRow>
-              </div>
-
               <div className="settings-field-block">
                 <div className="field__label">
                   <span>Interface scale</span>
@@ -647,32 +485,6 @@ function SettingsWorkspace({
               >
                 <Switch checked={form.ambient} onChange={(value) => update('ambient', value)} label="Ambient scene" />
               </FieldRow>
-
-              <div className="settings-field-block">
-                <div className="theme-studio-toggle">
-                  <div className="theme-studio-toggle__copy">
-                    <span className="field__label">Custom block theme</span>
-                    <p>
-                      Paint the sidebar, title bar, and window background with block textures from your
-                      installed Minecraft version, or a plain colour, then tune their opacity and the accent
-                      colour.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.customTheme.enabled}
-                    onChange={(value) => update('customTheme', { ...form.customTheme, enabled: value })}
-                    label="Custom block theme"
-                  />
-                </div>
-                {form.customTheme.enabled ? (
-                  <ThemeStudio
-                    value={form.customTheme}
-                    accent={form.accent}
-                    onChange={(next) => update('customTheme', next)}
-                    onInstallRequest={() => navigate('installations')}
-                  />
-                ) : null}
-              </div>
             </div>
           </section>
 

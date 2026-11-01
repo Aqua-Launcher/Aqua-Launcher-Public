@@ -115,13 +115,13 @@ export const DEFAULT_CUSTOM_THEME: CustomThemeSettings = {
   titlebar: { mode: 'block', block: 'oak_planks', color: '#b08b52', opacity: 35, pixelSize: 40 },
   backdrop: { mode: 'off', block: 'stone', color: '#8f8f8f', opacity: 18, pixelSize: 96 },
   accentMode: 'theme',
-  accentColor: '#5cc8e8',
+  accentColor: '#2f7fe0',
 }
 
 export const ACCENT_HEX: Record<AccentName, string> = {
-  aqua: '#5cc8e8',
-  ocean: '#4f9fe8',
-  steel: '#93aecb',
+  aqua: '#2f7fe0',
+  ocean: '#3f5fe0',
+  steel: '#6f8cad',
 }
 
 /** Swatches offered under the plain-colour picker. */
@@ -141,6 +141,7 @@ export const SURFACE_SWATCHES = [
 ]
 
 export const ACCENT_SWATCHES = [
+  '#2f7fe0',
   '#5cc8e8',
   '#4f9fe8',
   '#93aecb',
@@ -300,6 +301,7 @@ export const SURFACE_LABELS: Record<SurfaceKey, { label: string; hint: string }>
 const ACCENT_VARS = [
   '--accent',
   '--accent-strong',
+  '--accent-text',
   '--accent-soft',
   '--accent-softer',
   '--accent-ink',
@@ -308,15 +310,18 @@ const ACCENT_VARS = [
 ] as const
 
 export function accentVars(hex: string): Record<string, string> {
-  const base = parseHex(hex) ? (hex.startsWith('#') ? hex.toLowerCase() : `#${hex.toLowerCase()}`) : '#5cc8e8'
+  const base = parseHex(hex) ? (hex.startsWith('#') ? hex.toLowerCase() : `#${hex.toLowerCase()}`) : '#2f7fe0'
   return {
     '--accent': base,
-    '--accent-strong': mixHex(base, '#000000', 0.14),
-    '--accent-soft': rgba(base, 0.12),
+    '--accent-strong': mixHex(base, '#ffffff', 0.12),
+    // Text and icons sit on the dark surface, so they take a lighter step than
+    // the fill colour while keeping the same hue.
+    '--accent-text': mixHex(base, '#ffffff', 0.42),
+    '--accent-soft': rgba(base, 0.13),
     '--accent-softer': rgba(base, 0.06),
-    '--accent-ink': hexLuminance(base) > 0.45 ? '#04141b' : '#f2fbff',
-    '--accent-glow': rgba(base, 0.16),
-    '--line-accent': rgba(base, 0.34),
+    '--accent-ink': hexLuminance(base) > 0.5 ? '#120b24' : '#ffffff',
+    '--accent-glow': rgba(base, 0.2),
+    '--line-accent': rgba(base, 0.36),
   }
 }
 

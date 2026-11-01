@@ -536,6 +536,27 @@ export interface ModInstallResult {
   skipped: string[]
 }
 
+export type ModRetargetStatus = 'ready' | 'compatible' | 'blocked'
+
+/** What the launcher found in one installed mod jar's Minecraft version gate. */
+export interface ModRetargetAnalysis {
+  filename: string
+  targetVersion: string
+  targetLoader: string
+  modLoader: string | null
+  metadataPath: string | null
+  declaredRange: string | null
+  suggestedRange: string | null
+  status: ModRetargetStatus
+  reason: string | null
+  warnings: string[]
+  converted: boolean
+  canUndo: boolean
+  convertedAt: string | null
+  convertedVersion: string | null
+  originalRange: string | null
+}
+
 export interface ModpackInstallResult {
   installation: Installation
   job: DownloadJob
@@ -645,7 +666,7 @@ export interface BedrockStatus {
 /** One downloadable Bedrock build from the community version lists. */
 export interface BedrockCatalogEntry {
   version: string
-  /** `appx` packages can be registered on Windows; `msixvc` builds only install from the Store. */
+  /** `appx` packages unpack into a folder and register; `msixvc` builds install, replacing the current copy. */
   package: 'appx' | 'msixvc'
   channel: 'release' | 'beta' | 'preview'
   updateId: string | null
@@ -675,7 +696,7 @@ export interface BedrockVersionsState {
 
 export interface BedrockDownloadProgress {
   version: string
-  phase: 'resolving' | 'downloading' | 'extracting' | 'done' | 'error' | 'cancelled'
+  phase: 'resolving' | 'downloading' | 'extracting' | 'installing' | 'done' | 'error' | 'cancelled'
   receivedBytes: number
   totalBytes: number | null
   sizeBytes?: number
@@ -724,6 +745,19 @@ export interface BedrockRegistrationResult {
   packageVersion: string | null
 }
 
+export interface BedrockInstallResult {
+  version: string
+  file: string
+  command: string
+  /** The Minecraft version Windows was running before the install. */
+  replacedVersion: string | null
+  /** True when the build was older and Windows had to be told to replace the newer one. */
+  forcedDowngrade: boolean
+  installedVersion: string | null
+  packageVersion: string | null
+  installLocation: string | null
+}
+
 export interface BedrockLaunchResult {
   mode: 'launch' | 'join'
   editionId: string
@@ -767,6 +801,110 @@ export interface BedrockWorldsResult {
   worlds: BedrockWorldSummary[]
   backups: BedrockWorldBackup[]
 }
+
+export interface HorizonRelease {
+  tag: string
+  name: string
+  publishedAt: string | null
+  notesUrl: string | null
+  assetName: string
+  assetUrl: string
+  assetSize: number | null
+  assetDigest: string | null
+  checksumsUrl: string | null
+  signatureUrl: string | null
+}
+
+export interface HorizonReleaseCatalog {
+  releases: HorizonRelease[]
+  platform: string
+  arch: string
+  fetchedAt: string | null
+  fromCache: boolean
+  stale: boolean
+  error: string | null
+}
+
+export type HorizonInstallStatus = 'queued' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled'
+
+export interface HorizonInstallJob {
+  id: string
+  type: 'horizon'
+  tag: string
+  assetName: string
+  gameVersion: string | null
+  status: HorizonInstallStatus
+  stage: string
+  message: string | null
+  progress: number | null
+  indeterminate: boolean
+  bytesDone: number
+  bytesTotal: number
+  filesDone: number
+  filesTotal: number
+  speedBps: number
+  etaSeconds: number | null
+  currentFile: string | null
+  error: string | null
+  warning: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
+/** One Horizon build installed and prepared by Aqua. */
+export interface HorizonBuild {
+  tag: string
+  /** The Minecraft: Java Edition drop this build targets, from its research lock. */
+  gameVersion: string
+  directory: string
+  clientPath: string
+  resourcesDirectory: string
+  /** Aqua's bundled Horizon preparer has written the game resources. */
+  prepared: boolean
+  /** The newest installed build is the one Play starts by default. */
+  selected: boolean
+  installedAt: string | null
+  archiveSha256: string | null
+  assetName: string | null
+  javaMajor: number | null
+  warning: string | null
+}
+
+export interface HorizonStatus {
+  supported: boolean
+  supportedReason: string | null
+  installed: boolean
+  name: 'Horizon'
+  edition: 'horizon'
+  runtime: 'rust'
+  gameVersion: string | null
+  /** The named Java Edition drop, e.g. Wilderness Bound for 26.3. */
+  drop: string | null
+  dataRoot: string
+  dataRootExists: boolean
+  buildsDirectory: string
+  downloadsDirectory: string
+  gameHome: string
+  gameHomeExists: boolean
+  worldsDirectory: string
+  worlds: number
+  builds: HorizonBuild[]
+  selectedTag: string | null
+  install: HorizonInstallJob | null
+  managed: boolean
+  siteUrl: string
+}
+
+export interface HorizonLaunchResult {
+  mode: 'launch'
+  version: string
+  gameVersion: string
+  pid: number | null
+  gameHome: string
+}
+
+export type HorizonFolderKind = 'game' | 'worlds' | 'builds' | 'build' | 'downloads'
 
 export interface MinecraftSettingsFile {
   name: string

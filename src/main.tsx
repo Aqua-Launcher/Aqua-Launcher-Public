@@ -11,10 +11,10 @@ if (!root) throw new Error('Root element not found')
 
 if (!window.aqua) {
   root.innerHTML = `
-    <div style="min-height:100vh;display:grid;place-items:center;background:#0a0e13;color:#e8eef4;font-family:system-ui,sans-serif;padding:32px;text-align:center">
+    <div style="min-height:100vh;display:grid;place-items:center;background:#0e091c;color:#f4f1ff;font-family:system-ui,sans-serif;padding:32px;text-align:center">
       <div>
         <h1 style="font-size:22px;margin:0 0 8px">Aqua runs as a desktop app</h1>
-        <p style="color:#8a99a6;margin:0">Start it with <code style="color:#5cc8e8">npm run dev</code> rather than opening this page in a browser.</p>
+        <p style="color:#a79dbf;margin:0">Start it with <code style="color:#8fc4ff">npm run dev</code> rather than opening this page in a browser.</p>
       </div>
     </div>
   `

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Wand2,
   X,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
@@ -21,6 +22,7 @@ import { useLauncher } from '../state/LauncherProvider'
 import type { InstalledMod, ModrinthHit, ModrinthSearchResult, ModUpdatesResult } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { BedrockAddonsPanel } from '../components/bedrock/BedrockAddonsPanel'
+import { ModRetargetDialog } from '../components/mods/ModRetargetDialog'
 import { Button, EmptyState, IconButton, Spinner, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
 
@@ -96,6 +98,7 @@ export function ModsPage() {
   const [installingPack, setInstallingPack] = useState<string | null>(null)
   const [busyFile, setBusyFile] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InstalledMod | null>(null)
+  const [retargetTarget, setRetargetTarget] = useState<InstalledMod | null>(null)
   const [updateState, setUpdateState] = useState<ModUpdatesResult | null>(null)
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [updatingFile, setUpdatingFile] = useState<string | null>(null)
@@ -126,6 +129,7 @@ export function ModsPage() {
 
   useEffect(() => {
     setInstalled([])
+    setRetargetTarget(null)
     setUpdateState(null)
     checkedKey.current = null
     updateSeq.current += 1
@@ -541,6 +545,16 @@ export function ModsPage() {
                       </span>
                     </span>
                     <span className="mod-row__actions">
+                      {contentType === 'mod' ? (
+                        <IconButton
+                          label={`Convert ${mod.title} to Minecraft ${selectedInstallation?.versionId ?? 'this profile'}`}
+                          size="sm"
+                          onClick={() => setRetargetTarget(mod)}
+                          disabled={busyFile === mod.filename || updatingAll || updatingFile === mod.filename}
+                        >
+                          <Wand2 />
+                        </IconButton>
+                      ) : null}
                       {update ? (
                         <IconButton
                           label={`Update ${mod.title} to ${update.latestVersionNumber || 'the latest version'}`}
@@ -677,6 +691,13 @@ export function ModsPage() {
           </div>
         ) : null}
       </section>
+
+      <ModRetargetDialog
+        installationId={installationId}
+        mod={retargetTarget}
+        onClose={() => setRetargetTarget(null)}
+        onChanged={loadInstalled}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

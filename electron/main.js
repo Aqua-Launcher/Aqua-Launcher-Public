@@ -24,6 +24,7 @@ import { BedrockAddonsService } from './core/bedrock-addons.js'
 import { BedrockVersionsService } from './core/bedrock-versions.js'
 import { BlockTextureService } from './core/block-textures.js'
 import { GameManager } from './core/game.js'
+import { HorizonService } from './core/horizon.js'
 import { InstallationService } from './core/installations.js'
 import { Installer } from './core/installer.js'
 import { JavaService } from './core/java.js'
@@ -32,6 +33,7 @@ import { LoaderService } from './core/loaders.js'
 import { LogService } from './core/logs.js'
 import { MinecraftSettingsService } from './core/minecraft-settings.js'
 import { ModrinthService } from './core/modrinth.js'
+import { ModRetargetService } from './core/mod-retarget.js'
 import { createLogger } from './core/logger.js'
 import { ensureAppDirs, getPaths, getTrayIconPath, getWindowIconPath } from './core/paths.js'
 import { ServerService } from './core/servers.js'
@@ -124,7 +126,7 @@ function createWindow() {
     show: false,
     frame: false,
     thickFrame: true,
-    backgroundColor: '#070b09',
+    backgroundColor: '#0e091c',
     title: 'Aqua Launcher',
     icon: iconPath || undefined,
     autoHideMenuBar: true,
@@ -270,6 +272,18 @@ async function initialize() {
     // Defined below; the launcher is already up by the time a game can launch.
     emitActivity: () => emitActivity(),
   })
+  const horizonService = new HorizonService({
+    paths,
+    installer,
+    javaService,
+    logger,
+    store,
+    openPath: (target) => shell.openPath(target),
+    // Defined below; the launcher is already up by the time an install or launch happens.
+    emitActivity: () => emitActivity(),
+    emitNotification: (notification) => emitNotification(notification),
+    emitProgress: (job) => broadcast('horizon-install', job),
+  })
   const bedrockAddonsService = new BedrockAddonsService({ logger, bedrockService })
   const bedrockVersionsService = new BedrockVersionsService({
     paths,
@@ -327,6 +341,7 @@ async function initialize() {
   // Modpacks create their own installation and queue its game download, so the
   // Modrinth service needs those services to exist first.
   const modrinthService = new ModrinthService({ logger, installationService, jobManager, store, paths })
+  const modRetargetService = new ModRetargetService({ logger, modrinthService })
 
   const gameManager = new GameManager({
     paths,
@@ -351,12 +366,14 @@ async function initialize() {
     artworkService,
     loaderService,
     modrinthService,
+    modRetargetService,
     minecraftSettingsService,
     worldsService,
     serverService,
     bedrockService,
     bedrockVersionsService,
     bedrockAddonsService,
+    horizonService,
     installationService,
     javaService,
     accountManager,
@@ -445,6 +462,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   try {
     services?.accountManager?.dispose()
+    services?.horizonService?.dispose()
     logger?.info('Aqua Launcher shutting down')
   } catch {
     // Ignore shutdown logging failures.

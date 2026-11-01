@@ -5,6 +5,11 @@ import type {
   Bootstrap,
   DownloadJob,
   GameState,
+  HorizonFolderKind,
+  HorizonInstallJob,
+  HorizonLaunchResult,
+  HorizonReleaseCatalog,
+  HorizonStatus,
   InstalledContentResult,
   Installation,
   JavaInfo,
@@ -19,6 +24,7 @@ import type {
   MinecraftSettingsSyncResult,
   ModInstallResult,
   ModpackInstallResult,
+  ModRetargetAnalysis,
   ModrinthContentType,
   ModrinthSearchResult,
   ModUpdateResult,
@@ -27,6 +33,7 @@ import type {
   BedrockAddonsResult,
   BedrockCatalog,
   BedrockDownloadProgress,
+  BedrockInstallResult,
   BedrockLaunchResult,
   BedrockRegistrationResult,
   BedrockStatus,
@@ -138,6 +145,9 @@ export interface AquaApi {
       contentType?: ModrinthContentType,
     ) => Promise<{ filename: string; enabled: boolean }>
     remove: (installationId: string, filename: string, contentType?: ModrinthContentType) => Promise<{ filename: string }>
+    retargetInfo: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
+    retarget: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
+    retargetUndo: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
     openFolder: (installationId: string, contentType?: ModrinthContentType) => Promise<string>
   }
   downloads: {
@@ -180,6 +190,14 @@ export interface AquaApi {
     ping: (address: string, edition?: ServerEdition) => Promise<ServerStatus>
     markJoined: (id: string) => Promise<ServerEntry>
   }
+  horizon: {
+    status: (options?: { force?: boolean }) => Promise<HorizonStatus>
+    releases: (options?: { force?: boolean }) => Promise<HorizonReleaseCatalog>
+    install: (tag: string) => Promise<HorizonInstallJob>
+    cancelInstall: () => Promise<HorizonInstallJob>
+    launch: (version?: string | null) => Promise<HorizonLaunchResult>
+    openFolder: (kind: HorizonFolderKind, version?: string | null) => Promise<string>
+  }
   bedrock: {
     status: (options?: { force?: boolean }) => Promise<BedrockStatus>
     launch: (id: string, serverAddress?: string | null) => Promise<BedrockLaunchResult>
@@ -199,6 +217,7 @@ export interface AquaApi {
       version: string,
       options?: { ignoreMissingDependencies?: boolean },
     ) => Promise<BedrockRegistrationResult>
+    installVersion: (version: string) => Promise<BedrockInstallResult>
     addons: (editionId: string) => Promise<BedrockAddonsResult>
     importAddon: (editionId: string, filePath: string) => Promise<BedrockAddonImportResult>
     removeAddon: (editionId: string, kind: string, folder: string) => Promise<{ folder: string; kind: string }>
@@ -273,6 +292,7 @@ export type EventPayloadMap = {
   notification: { level: 'success' | 'error' | 'info' | 'warning'; title: string; message?: string }
   windowState: { maximized: boolean }
   'bedrock-versions': BedrockDownloadProgress
+  'horizon-install': HorizonInstallJob
   'storage:progress': StorageProgress
   'bedrock-addons': { editionId: string; installed: string[]; filename: string }
 }

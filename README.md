@@ -17,6 +17,7 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Server list** with saved addresses, live status checks, quick refresh, and one-click joins: Java servers use Server List Ping and Quick Play, while Bedrock servers are queried over RakNet and opened through Minecraft's `minecraft://` deep link. Each saved server remembers its edition.
 - **Bedrock Edition (Windows)** support: Aqua finds Minecraft for Windows and Minecraft Preview in the Microsoft Store packages, shows their versions and data folders, launches them, and lists their worlds alongside Java saves.
 - **Bedrock version browser** that lists the builds Microsoft has published to the Store (releases, beta, and preview channels, 500+ builds), downloads the one you pick into the launcher's own folder, and registers it with Windows so it can be played alongside your Store copy.
+- **Horizon (Rust Edition)** support: Aqua installs Horizon's official Rust client itself, provisions the pinned Minecraft and Java files, prepares the game resources with Horizon's bundled preparer, and starts the client directly. No Horizon launcher is involved.
 - **Mod loaders** for Fabric, Quilt, Forge, and NeoForge. Fabric and Quilt use their official meta profiles; Forge and NeoForge run their own installers into the launcher's Minecraft root. A loader is selected per installation and its profile version is what gets downloaded and launched.
 - **Minecraft installation pipeline** that resolves inheritance, libraries, natives, assets, and logging configuration, with integrity-checked downloads, verification, and repair. Interrupted installs reuse already-verified files.
 - **Mod updates** via Modrinth's hash lookup: check all installed content at once, update individual files, or update everything, while preserving disabled files.
@@ -89,7 +90,7 @@ Bedrock is started by Windows rather than by the launcher, so it has no process,
 Choosing **Download** streams the package into `bedrock/downloads/` and unpacks it into `bedrock/versions/<version>/` — the launcher's own folder, never the Store's install directory. Two package shapes are supported:
 
 - **APPX** (UWP-era builds): unpacked entry by entry, with the Store signature dropped, exactly as the existing version switchers do. **Register build** then runs `Add-AppxPackage -Path … -Register` through one elevated PowerShell prompt, after which Minecraft for Windows can be launched through the same Activation Manager path the launcher already uses. Windows **Developer Mode** is required and Aqua says so when it is off.
-- **MSIXVC** (current GDK builds): saved as `package.msixvc` because only the Microsoft Store can install that format; Aqua keeps the link and the file for reference rather than pretending to install it.
+- **MSIXVC** (current GDK builds): an encrypted Store container with no manifest to point at, so it is saved as `package.msixvc` and handed to Windows with **Install build**, which runs `Add-AppxPackage -Path …` unelevated for the signed-in account. Windows deploys it over the copy it is running now, and an older build is passed `-ForceUpdateFromAnyVersion` so the downgrade is accepted. The confirmation spells out that Minecraft's data folder moves when switching between UWP and GDK builds, so worlds should be backed up first.
 
 Registering is a swap, not a side-by-side install: Windows points the `Microsoft.MinecraftUWP` package at the downloaded folder for your account, so the Microsoft Store copy stops being listed (the launcher reports Minecraft for Windows as not found) until you install it again. The confirmation dialog says so before anything changes. To get the Store copy back, open the Microsoft Store, find Minecraft for Windows under **Library**, and install it; the Store may also overwrite a registered build on its next update, in which case re-register the download to switch back.
 
@@ -99,7 +100,7 @@ Older builds (1.9.x and the 2015-era previews) also declare framework packages t
 
 Each download is roughly 0.9–1.2 GB, plus the same again once unpacked.
 
-When Windows reports no Store edition but the launcher still has builds downloaded, **Installations** lists them with **Register build**, **Open folder**, and **Remove**, so a swapped or deleted registration can be restored without downloading anything again.
+When Windows reports no Store edition but the launcher still has builds downloaded, **Installations** lists them with **Register build** (APPX) or **Install build** (MSIXVC), **Open folder**, and **Remove**, so a swapped or deleted registration can be restored without downloading anything again. Both Bedrock pages lead with a **Downloaded builds** strip, so a build that is older than the first page of the catalog still has its action in reach.
 
 ### Bedrock add-ons
 
@@ -111,6 +112,22 @@ Add-ons are files rather than a service, so there are two ways in:
 - **Browse add-ons** is a browser built into the page for the sites that share packs (MCPE Addons, ModBay, and more through the address bar). It runs in its own Electron session with no Node access, no preload script, denied permissions, and only http(s) navigation. Downloads of `.mcpack`, `.mcaddon`, and `.mcworld` are intercepted before they reach disk and installed straight into the edition, with a toast naming the packs and the list refreshing itself; a download that cannot be installed is copied to your Downloads folder so it can still be imported by hand.
 
 MCPEDL is the largest of those sites, but it answers embedded browsers with a bot check that never clears, so its shortcut opens in your real browser and its files come back through **Import add-on**. None of these sites offers a public catalogue API (and Modrinth and CurseForge do not carry Bedrock add-ons), which is why this is a browser view rather than a search integration. Bedrock still applies packs per world, in the game under **Settings → Add-Ons**, so an installed pack appears under a world's add-on settings rather than changing every world at once.
+
+## Horizon (Rust Edition)
+
+Horizon is the open-source Rust rewrite of Minecraft: Java Edition (26.3, Wilderness Bound), and it keeps its own game home and worlds. **Installations → Horizon** installs Horizon inside Aqua and starts the Rust client directly — the same external-launch model as Bedrock, not a Java profile. Horizon's launcher is not required, downloaded, or run.
+
+Installing a build from the panel does the whole job inside Aqua's data folder:
+
+- Downloads the matching official game release from `horizon-rust/horizon` on GitHub and verifies its SHA-256 checksum.
+- Installs the Minecraft version pinned by the release's `research-lock.json` through Aqua's normal Minecraft pipeline (or reuses an existing Aqua install of it).
+- Downloads the pinned server jar and installs the required Mojang Java runtime when Java 25 is not already available.
+- Runs Horizon's own bundled `horizon-prepare --prepare` against Aqua's Minecraft folder, then copies the pinned sounds with `horizon-prepare sounds`.
+- Writes a build marker and registers the prepared build for direct launch.
+
+The build, downloads, game home, and worlds live under `%APPDATA%\Aqua Launcher\horizon\` on Windows (or the equivalent Aqua `userData` folder on macOS and Linux). Horizon's old launcher folder, `HORIZON_LAUNCHER_HOME`, and `.installed` markers are not read. A build is playable once its resource manifest (`horizon-resources.json`) is present; the panel shows progress for each install and lets you cancel it. If the optional sound copy fails, the build is still installed and the panel notes that it will be silent.
+
+**Play** starts the newest installed build (`horizon-client --resources …`) with the Aqua Horizon game home as its working directory and sets `HORIZON_HOME` for the child. Each build also has its own **Play** button. **Game folder**, **Worlds**, **Builds**, and **Downloads** open Aqua's folders. Because the Rust game runs outside Aqua, Horizon launches have no playtime, log capture, or crash report in Aqua. You still need your own Minecraft: Java Edition copy, which Horizon's preparer reads from the files Aqua installs. [Horizon's site](https://playhorizon.dev/) covers the project.
 
 ## Worlds and backups
 
@@ -189,6 +206,7 @@ electron/
     bedrock.js        Store edition detection, launching, Bedrock worlds
     bedrock-versions.js  Store version catalogue, package downloads, registration
     bedrock-addons.js    Bedrock pack parsing, import/remove, add-on listing
+    horizon.js          Horizon release install, preparation, and direct Rust client launch
     addon-browser.js     in-app add-on browser policy and download-to-import bridge
     java.js           Java detection and Mojang runtime provisioning
     game.js           launch construction, process tracking, crash capture
@@ -223,8 +241,9 @@ This builds the renderer and uses `electron-builder` to produce an installer in 
 - Java detection scans common system locations and Aqua's own runtime folder. You can always select a custom `java.exe` in Settings.
 - The launcher supports vanilla and version metadata that follows the standard Mojang format; mod loaders are not installed automatically.
 - Bedrock support is Windows-only, and only for the Minecraft Store editions. The Store app owns updates, sign-in, and world management, so Aqua detects, launches, and lists it rather than installing or patching it. Bedrock worlds cannot be backed up or deleted from the launcher.
+- Horizon is installed and prepared by Aqua; its launcher is not used. Horizon launches still have no playtime or log/crash tracking, and Horizon accounts, mods, and extra instances stay outside Aqua.
 - Bedrock game versions are derived from the Store package version (package `1.21.2301.0` is game `1.21.23.01`), because the package does not carry the display version. The raw package version is shown next to it.
-- Downloaded Bedrock builds are unofficial copies of Store packages: they need Developer Mode and an administrator prompt to register, the Store can overwrite them on update, and MSIXVC builds cannot be registered at all. Only register builds you are entitled to play.
+- Downloaded Bedrock builds are unofficial copies of Store packages: APPX builds need Developer Mode (with an administrator prompt as the fallback) to register, MSIXVC builds are installed through Windows and replace the current copy, and the Store can overwrite either on its next update. Only use builds you are entitled to play.
 - Older Bedrock builds that Microsoft has delisted can still be listed, but their packages are no longer served, so downloading them fails with a clear message.
 - Builds that depend on frameworks Windows 11 no longer ships only register once those requirements are dropped from their manifest, and any Store feature backed by that framework stops working.
 - The Play target is remembered for the running session only; the launcher starts on the active Java installation again after a restart.

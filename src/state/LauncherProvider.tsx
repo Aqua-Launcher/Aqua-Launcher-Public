@@ -9,8 +9,6 @@ import {
   type ReactNode,
 } from 'react'
 import { api, getErrorMessage, type EventPayloadMap } from '../lib/api'
-import { loadBlockTextures } from '../lib/block-textures'
-import { applyCustomTheme, subscribeBlockTextures } from '../lib/custom-theme'
 import type {
   ActivityEntry,
   AuthMode,
@@ -23,6 +21,7 @@ import type {
   Bootstrap,
   DownloadJob,
   GameState,
+  HorizonBuild,
   InstallDialogState,
   Installation,
   InstallationInput,
@@ -39,20 +38,6 @@ import type {
 } from '../lib/types'
 
 type AuthInputStatus = 'idle' | 'starting' | 'waiting' | 'finalizing' | 'success' | 'error'
-
-/** Rounded corners follow the interface font while the lock is engaged. */
-export function resolveRounding(
-  settings: Pick<Settings, 'fontFamily' | 'roundedCorners' | 'roundedCornersLinked'>,
-): boolean {
-  return settings.roundedCornersLinked ? settings.fontFamily === 'quicksand' : settings.roundedCorners
-}
-
-/** The chunky 3D chrome follows the interface font while its lock is engaged. */
-export function resolveChunkyChrome(
-  settings: Pick<Settings, 'fontFamily' | 'chunkyChrome' | 'chunkyChromeLinked'>,
-): boolean {
-  return settings.chunkyChromeLinked ? settings.fontFamily === 'minecraft' : settings.chunkyChrome
-}
 
 interface PendingLaunch {
   installationId: string
@@ -111,10 +96,19 @@ interface LauncherContextValue {
   bedrockLoading: boolean
   bedrockError: string | null
   refreshBedrock: (force?: boolean) => Promise<void>
-  launchBedrock: (editionId: string, serverAddress?: string | null) => Promise<boolean>
-  /** The Bedrock edition the Play button launches, or null for the Java installation. */
+  launchBedrock: (
+    editionId: string,
+    serverAddress?: string | null,
+    options?: { keepTarget?: boolean },
+  ) => Promise<boolean>
+  /** The Bedrock edition the Play button launches, or null for the Java installation or Horizon. */
   bedrockTarget: BedrockEdition | null
   selectBedrockTarget: (editionId: string | null) => void
+  launchHorizon: (build: HorizonBuild, options?: { keepTarget?: boolean }) => Promise<boolean>
+  /** The Horizon build the Play button launches, when one is targeted. */
+  horizonTarget: HorizonBuild | null
+  selectHorizonTarget: (build: HorizonBuild | null) => void
+  launchingHorizonTag: string | null
   bedrockVersions: BedrockCatalog | null
   bedrockVersionsLoading: boolean
   bedrockVersionsError: string | null
@@ -125,11 +119,13 @@ interface LauncherContextValue {
   cancelBedrockVersion: (version: string) => Promise<void>
   removeBedrockVersion: (version: string) => Promise<void>
   openBedrockVersionFolder: (version: string) => Promise<void>
+  /** Installs a downloaded MSIXVC build through Windows, replacing the current copy. */
+  installBedrockVersion: (version: string) => Promise<boolean>
   registerBedrockVersion: (
     version: string,
     options?: { ignoreMissingDependencies?: boolean },
   ) => Promise<void>
-  play: (installationId: string) => Promise<void>
+  play: (installationId: string, options?: { keepTarget?: boolean }) => Promise<void>
   joinServer: (serverId: string, address: string, edition?: ServerEdition) => Promise<boolean>
   launchGame: (installationId: string) => Promise<void>
   installGame: (installationId: string) => Promise<DownloadJob | null>
@@ -180,6 +176,9 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [bedrockDownloads, setBedrockDownloads] = useState<Record<string, BedrockDownloadProgress>>({})
   /** Which Bedrock edition the dashboard's Play button is pointed at. */
   const [bedrockTargetId, setBedrockTargetId] = useState<string | null>(null)
+  /** Which Horizon build the dashboard's Play button is pointed at. */
+  const [horizonTarget, setHorizonTarget] = useState<HorizonBuild | null>(null)
+  const [launchingHorizonTag, setLaunchingHorizonTag] = useState<string | null>(null)
   const [route, setRoute] = useState<RouteState>({ page: 'home' })
   const [toasts, setToasts] = useState<Toast[]>([])
   const [downloadsOpen, setDownloadsOpen] = useState(false)
@@ -196,7 +195,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const toastTimers = useRef(new Map<string, number>())
   const initialised = useRef(false)
   const refreshedJavaJobs = useRef(new Set<string>())
-  const refreshedTextureJobs = useRef(new Set<string>())
   const versionRequest = useRef(0)
   const javaRequest = useRef(0)
   const bedrockRequest = useRef(0)
@@ -227,16 +225,18 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  // The launcher has one designed look. Style values saved by earlier builds
+  // stay in the settings file but no longer change the surface, so the app
+  // renders the same on every install.
   const applyTheme = useCallback((settings: Settings) => {
     const root = document.documentElement
-    root.dataset.theme = settings.theme
-    root.dataset.accent = settings.accent
-    root.dataset.font = settings.fontFamily
-    root.dataset.rounding = resolveRounding(settings) ? 'rounded' : 'square'
-    root.dataset.depth = String(resolveChunkyChrome(settings))
+    root.dataset.theme = 'midnight'
+    root.dataset.accent = 'aqua'
+    root.dataset.font = 'quicksand'
+    root.dataset.rounding = 'rounded'
+    root.dataset.depth = 'false'
     root.dataset.reduceMotion = String(settings.reduceMotion)
     root.dataset.ambient = String(settings.ambient)
-    applyCustomTheme(root, settings.customTheme)
   }, [])
 
   const refreshJava = useCallback(
@@ -407,32 +407,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     return undefined
   }, [data?.auth.status, authOpen])
 
-  // Custom block themes read their textures from installed game files. Repaint
-  // the open window as soon as the main process has extracted them.
-  useEffect(() => {
-    const unsubscribe = subscribeBlockTextures(() => {
-      const current = dataRef.current
-      if (current) applyTheme(current.settings)
-    })
-    return unsubscribe
-  }, [applyTheme])
-
-  // Reading the client jar is only worth it once a block theme is in use; the
-  // studio also loads textures when it is opened.
-  useEffect(() => {
-    if (data?.settings.customTheme.enabled) void loadBlockTextures()
-  }, [data?.settings.customTheme.enabled])
-
-  useEffect(() => {
-    if (!data?.settings.customTheme.enabled) return
-    for (const job of data.jobs) {
-      if (job.type === 'install' && job.status === 'completed' && !refreshedTextureJobs.current.has(job.id)) {
-        refreshedTextureJobs.current.add(job.id)
-        void loadBlockTextures(true)
-      }
-    }
-  }, [data])
-
   useEffect(() => {
     if (!data) return
     for (const job of data.jobs) {
@@ -496,11 +470,17 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   )
 
   const launchBedrock = useCallback(
-    async (editionId: string, serverAddress: string | null = null) => {
+    async (
+      editionId: string,
+      serverAddress: string | null = null,
+      options: { keepTarget?: boolean } = {},
+    ) => {
+      if (!options.keepTarget) {
+        setBedrockTargetId(editionId)
+        setHorizonTarget(null)
+      }
       try {
         const result = await api.bedrock.launch(editionId, serverAddress)
-        // Whatever launched last is what the Play button keeps offering.
-        setBedrockTargetId(editionId)
         if (result.mode === 'join') {
           pushToast({
             level: 'success',
@@ -653,6 +633,44 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     [pushToast, refreshBedrock],
   )
 
+  const installBedrockVersion = useCallback(
+    async (version: string) => {
+      setBedrockDownloads((current) => ({
+        ...current,
+        [version]: { version, phase: 'installing', receivedBytes: 0, totalBytes: null },
+      }))
+      try {
+        const result = await api.bedrock.installVersion(version)
+        const replaced = result.replacedVersion
+          ? `Windows replaced Minecraft ${result.replacedVersion}.`
+          : 'Windows installed it as Minecraft for Windows.'
+        const downgrade = result.forcedDowngrade ? ' The build is older, so it will offer to update when it starts.' : ''
+        pushToast({
+          level: 'success',
+          title: `Minecraft ${result.installedVersion || version} installed`,
+          message: `${replaced}${downgrade}`,
+        })
+        void refreshBedrock(true)
+        void refreshBedrockLibrary()
+        return true
+      } catch (error) {
+        pushToast({
+          level: 'error',
+          title: `Bedrock ${version} could not be installed`,
+          message: getErrorMessage(error),
+        })
+        return false
+      } finally {
+        setBedrockDownloads((current) => {
+          const next = { ...current }
+          delete next[version]
+          return next
+        })
+      }
+    },
+    [pushToast, refreshBedrock, refreshBedrockLibrary],
+  )
+
   const joinServer = useCallback(
     async (serverId: string, address: string, edition: ServerEdition = 'java') => {
       if (edition === 'bedrock') {
@@ -770,14 +788,23 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   )
 
   const play = useCallback(
-    async (installationId: string) => {
-      setBedrockTargetId(null)
+    async (installationId: string, options: { keepTarget?: boolean } = {}) => {
       const current = dataRef.current
       if (!current) return
       const installation = current.installations.find((item) => item.id === installationId)
       if (!installation) {
         pushToast({ level: 'error', title: 'Installation missing', message: 'Choose an installation and try again.' })
         return
+      }
+      if (!options.keepTarget) {
+        // The Play button also points the dashboard at this installation.
+        setBedrockTargetId(null)
+        setHorizonTarget(null)
+        try {
+          await api.installations.setActive(installationId)
+        } catch (error) {
+          pushToast({ level: 'error', title: 'Could not set the Play target', message: getErrorMessage(error) })
+        }
       }
       if (current.game.status === 'preparing' || current.game.status === 'running') {
         pushToast({
@@ -907,12 +934,53 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   const setActiveInstallation = useCallback(async (id: string) => {
     setBedrockTargetId(null)
+    setHorizonTarget(null)
     await api.installations.setActive(id)
   }, [])
 
   const selectBedrockTarget = useCallback((editionId: string | null) => {
     setBedrockTargetId(editionId)
+    if (editionId) setHorizonTarget(null)
   }, [])
+
+  const selectHorizonTarget = useCallback((build: HorizonBuild | null) => {
+    setHorizonTarget(build)
+    if (build) setBedrockTargetId(null)
+  }, [])
+
+  /** Starts a Horizon build directly and points the dashboard's Play at it. */
+  const launchHorizon = useCallback(
+    async (build: HorizonBuild, options: { keepTarget?: boolean } = {}) => {
+      if (!build.prepared) {
+        pushToast({
+          level: 'info',
+          title: 'Horizon is not ready yet',
+          message: 'Install this build again so Aqua can finish preparing its resources.',
+        })
+        return false
+      }
+      if (!options.keepTarget) {
+        setHorizonTarget(build)
+        setBedrockTargetId(null)
+      }
+      setLaunchingHorizonTag(build.tag)
+      try {
+        await api.horizon.launch(build.tag)
+        pushToast({
+          level: 'success',
+          title: options.keepTarget ? 'Quick-launching Horizon' : 'Launching Horizon',
+          message: `Minecraft ${build.gameVersion} · ${build.tag} is starting.`,
+        })
+        return true
+      } catch (error) {
+        pushToast({ level: 'error', title: 'Horizon could not start', message: getErrorMessage(error) })
+        return false
+      } finally {
+        setLaunchingHorizonTag(null)
+      }
+    },
+    [pushToast],
+  )
 
   const openInstallationFolder = useCallback(
     async (id: string) => {
@@ -1097,6 +1165,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       launchBedrock,
       bedrockTarget,
       selectBedrockTarget,
+      launchHorizon,
+      horizonTarget,
+      selectHorizonTarget,
+      launchingHorizonTag,
       bedrockVersions,
       bedrockVersionsLoading,
       bedrockVersionsError,
@@ -1108,6 +1180,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       removeBedrockVersion,
       openBedrockVersionFolder,
       registerBedrockVersion,
+      installBedrockVersion,
       play,
       joinServer,
       launchGame,
@@ -1147,6 +1220,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       openBedrockVersionFolder,
       refreshBedrockVersions,
       registerBedrockVersion,
+      installBedrockVersion,
       removeBedrockVersion,
       authInitialMode,
       authPhase,
@@ -1179,6 +1253,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       launchBedrock,
       launchError,
       launchGame,
+      launchHorizon,
+      launchingHorizonTag,
+      horizonTarget,
+      selectHorizonTarget,
       launchingId,
       loadBootstrap,
       refreshBedrock,

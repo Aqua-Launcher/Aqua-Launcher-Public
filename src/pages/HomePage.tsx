@@ -4,6 +4,7 @@ import {
   Boxes,
   ChevronRight,
   Coffee,
+  Cpu,
   Download,
   FolderOpen,
   Gamepad2,
@@ -92,18 +93,22 @@ export function HomePage() {
     installGame,
     pushToast,
     openInstallationFolder,
-    setActiveInstallation,
     bedrock,
     launchBedrock,
     bedrockTarget,
+    horizonTarget,
+    launchHorizon,
+    launchingHorizonTag,
   } = useLauncher()
 
   const gameRunning = game.status === 'running'
   const gamePreparing = game.status === 'preparing'
-  // Bedrock runs outside the launcher's process tracking, so it never reports
-  // a running game; the hero simply points Play at the selected edition.
+  // Bedrock and Horizon run outside the launcher's process tracking, so they
+  // never report a running game; the hero simply points Play at the target.
   const targetIsBedrock = Boolean(bedrockTarget)
-  const heroArtwork = useHeroArtwork(targetIsBedrock ? null : selectedInstallation?.versionId)
+  const targetIsHorizon = !targetIsBedrock && Boolean(horizonTarget)
+  const targetIsJava = !targetIsBedrock && !targetIsHorizon
+  const heroArtwork = useHeroArtwork(targetIsJava ? selectedInstallation?.versionId : null)
   useNow(gameRunning || gamePreparing)
 
   const [recentServers, setRecentServers] = useState<ServerEntry[]>([])
@@ -133,6 +138,17 @@ export function HomePage() {
     [pushToast],
   )
 
+  const openHorizonFolder = useCallback(
+    async (kind: 'game' | 'worlds') => {
+      try {
+        await api.horizon.openFolder(kind)
+      } catch (error) {
+        pushToast({ level: 'error', title: 'Could not open that folder', message: getErrorMessage(error) })
+      }
+    },
+    [pushToast],
+  )
+
   const handleRecentServer = async (server: ServerEntry) => {
     const joined = await joinServer(
       server.id,
@@ -142,12 +158,12 @@ export function HomePage() {
     if (joined) void loadRecentServers()
   }
 
-  const loaderType: LoaderType = targetIsBedrock ? 'vanilla' : selectedInstallation?.loader?.type || 'vanilla'
-  const installJob = targetIsBedrock ? null : findInstallJob(jobs, selectedInstallation?.id)
-  const otherGameRunning = !targetIsBedrock && gameRunning && game.installationId !== selectedInstallation?.id
-  const isPlayingSelected = !targetIsBedrock && gameRunning && game.installationId === selectedInstallation?.id
+  const loaderType: LoaderType = targetIsJava ? selectedInstallation?.loader?.type || 'vanilla' : 'vanilla'
+  const installJob = targetIsJava ? findInstallJob(jobs, selectedInstallation?.id) : null
+  const otherGameRunning = targetIsJava && gameRunning && game.installationId !== selectedInstallation?.id
+  const isPlayingSelected = targetIsJava && gameRunning && game.installationId === selectedInstallation?.id
   const isPreparingSelected =
-    !targetIsBedrock &&
+    targetIsJava &&
     ((gamePreparing && game.installationId === selectedInstallation?.id) || launchingId === selectedInstallation?.id)
   const recentItems = useMemo(() => {
     const playedInstallations = installations
@@ -175,6 +191,15 @@ export function HomePage() {
   if (targetIsBedrock) {
     playLabel = 'Play'
     playIcon = <Boxes />
+  } else if (targetIsHorizon) {
+    if (launchingHorizonTag === horizonTarget?.tag) {
+      playLabel = 'Launching'
+      playIcon = <Spinner label="Launching Horizon" />
+      playBusy = true
+    } else {
+      playLabel = 'Play'
+      playIcon = <Cpu />
+    }
   } else if (installJob) {
     playLabel = installJob.progress != null ? `Installing ${installJob.progress}%` : 'Installing'
     playIcon = <Download />
@@ -198,11 +223,15 @@ export function HomePage() {
     isPreparingSelected ||
     isPlayingSelected ||
     otherGameRunning ||
-    (!selectedInstallation && !bedrockTarget)
+    (!selectedInstallation && !bedrockTarget && !horizonTarget)
 
   const handlePlay = () => {
     if (bedrockTarget) {
       void launchBedrock(bedrockTarget.id)
+      return
+    }
+    if (horizonTarget) {
+      void launchHorizon(horizonTarget)
       return
     }
     if (!selectedInstallation) return
@@ -218,7 +247,7 @@ export function HomePage() {
   }
 
   const subtitle = activeAccount
-    ? 'Launch your selected profile or manage installations, versions, and logs.'
+    ? 'Launch your Play target or manage installations, versions, and logs.'
     : MICROSOFT_AUTH_ENABLED
       ? 'Add an offline or Microsoft profile to launch the game. You can create an installation first if you prefer.'
       : 'Add an offline profile to launch the game. You can create an installation first if you prefer.'
@@ -239,7 +268,7 @@ export function HomePage() {
             title={activeAccount ? `${greetingForHour(hour)}, ${activeAccount.name}` : greetingForHour(hour)}
             subtitle={subtitle}
             actions={
-              selectedInstallation || bedrockTarget ? (
+              selectedInstallation || bedrockTarget || horizonTarget ? (
                 <div className="hero__play-actions">
                   <button
                     type="button"
@@ -250,7 +279,7 @@ export function HomePage() {
                     {playIcon}
                     <span>{playLabel}</span>
                   </button>
-                  {!targetIsBedrock && selectedInstallation ? (
+                  {targetIsJava && selectedInstallation ? (
                     <AccountSwitcherToggle
                       key={selectedInstallation.id}
                       installation={selectedInstallation}
@@ -268,12 +297,13 @@ export function HomePage() {
             </div>
             <div className="hero__badges">
               {targetIsBedrock ? <span className="hero__tag hero__tag--bedrock">Bedrock Edition</span> : null}
-              {!targetIsBedrock && selectedInstallation && selectedInstallation.versionType !== 'release' ? (
+              {targetIsHorizon ? <span className="hero__tag hero__tag--horizon">Horizon · Rust Edition</span> : null}
+              {targetIsJava && selectedInstallation && selectedInstallation.versionType !== 'release' ? (
                 <span className={cx('hero__tag', `hero__tag--${selectedInstallation.versionType}`)}>
                   {versionTypeLabel(selectedInstallation.versionType)}
                 </span>
               ) : null}
-              {loaderType !== 'vanilla' ? (
+              {targetIsJava && loaderType !== 'vanilla' ? (
                 <span
                   className="hero__loader"
                   role="img"
@@ -310,6 +340,37 @@ export function HomePage() {
                       label: 'Data folder',
                       icon: <FolderOpen />,
                       onSelect: () => void openBedrockFolder(bedrockTarget.id),
+                    },
+                  ]}
+                />
+              </div>
+            ) : horizonTarget ? (
+              <div className="hero__installation">
+                <button type="button" className="hero__installation-main" onClick={() => navigate('installations')}>
+                  <span className="hero__installation-icon">
+                    <Cpu size={20} />
+                  </span>
+                  <span className="hero__installation-copy">
+                    <span className="hero__installation-name">Horizon</span>
+                    <span className="hero__installation-version">
+                      Minecraft {horizonTarget.gameVersion} · Rust Edition · {horizonTarget.tag}
+                    </span>
+                  </span>
+                </button>
+                <ActionMenu
+                  label="Horizon build actions"
+                  className="hero__installation-menu"
+                  trigger={<Plus />}
+                  items={[
+                    {
+                      label: 'Worlds',
+                      icon: <FolderOpen />,
+                      onSelect: () => void openHorizonFolder('worlds'),
+                    },
+                    {
+                      label: 'Game folder',
+                      icon: <FolderOpen />,
+                      onSelect: () => void openHorizonFolder('game'),
                     },
                   ]}
                 />
@@ -473,9 +534,8 @@ export function HomePage() {
                 <button
                   key={installation.id}
                   type="button"
-                  className={cx('recent-card', installation.isActive && 'is-active')}
+                  className={cx('recent-card', targetIsJava && installation.isActive && 'is-active')}
                   onClick={() => {
-                    void setActiveInstallation(installation.id)
                     if (isCurrent) navigate('logs', { category: 'game', installationId: installation.id })
                     else void play(installation.id)
                   }}

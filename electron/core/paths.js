@@ -15,6 +15,7 @@ export function getPaths() {
   const runtimeRoot = path.join(dataRoot, 'runtime')
   const backupsRoot = path.join(dataRoot, 'backups')
   const bedrockRoot = path.join(dataRoot, 'bedrock')
+  const horizonRoot = path.join(dataRoot, 'horizon')
   cachedPaths = {
     dataRoot,
     configFile: path.join(dataRoot, 'launcher.json'),
@@ -34,6 +35,12 @@ export function getPaths() {
     bedrockRoot,
     bedrockVersionsRoot: path.join(bedrockRoot, 'versions'),
     bedrockDownloadsRoot: path.join(bedrockRoot, 'downloads'),
+    horizonRoot,
+    horizonVersionsRoot: path.join(horizonRoot, 'versions'),
+    horizonDownloadsRoot: path.join(horizonRoot, 'downloads'),
+    horizonGameRoot: path.join(horizonRoot, 'game'),
+    horizonCacheRoot: path.join(horizonRoot, 'cache'),
+    horizonReleasesCacheFile: path.join(horizonRoot, 'cache', 'releases.json'),
     manifestCacheFile: path.join(cacheRoot, 'version-manifest.json'),
     patchNotesCacheFile: path.join(cacheRoot, 'patch-notes.json'),
     dropsCacheFile: path.join(cacheRoot, 'minecraft-drops.json'),
@@ -64,6 +71,11 @@ export async function ensureAppDirs(paths) {
     paths.bedrockRoot,
     paths.bedrockVersionsRoot,
     paths.bedrockDownloadsRoot,
+    paths.horizonRoot,
+    paths.horizonVersionsRoot,
+    paths.horizonDownloadsRoot,
+    paths.horizonGameRoot,
+    paths.horizonCacheRoot,
   ]) {
     await fs.promises.mkdir(dir, { recursive: true })
   }

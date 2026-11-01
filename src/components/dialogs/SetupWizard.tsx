@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Check, Sparkles } from 'lucide-react'
 import { getErrorMessage } from '../../lib/api'
 import { useLauncher } from '../../state/LauncherProvider'
-import type { FontFamily, ThemeName } from '../../lib/types'
 import { TitleArtwork } from '../brand/Artwork'
 import { Button, Switch, cx } from '../ui/primitives'
 import { Modal } from '../ui/overlays'
@@ -13,24 +12,12 @@ const FONT_SIZES: Array<{ value: number; label: string }> = [
   { value: 1.15, label: 'Large' },
 ]
 
-const INTERFACE_FONTS: Array<{ value: FontFamily; label: string }> = [
-  { value: 'minecraft', label: 'Minecraft' },
-  { value: 'quicksand', label: 'Quicksand' },
-]
-
-const THEMES: Array<{ value: ThemeName; label: string }> = [
-  { value: 'midnight', label: 'Midnight' },
-  { value: 'slate', label: 'Slate' },
-]
-
 export function SetupWizard() {
   const { setupOpen, data, settings, activeAccount, signInOffline, saveSettings, completeSetup, dismissSetup } =
     useLauncher()
   const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [finishing, setFinishing] = useState(false)
-  const [theme, setTheme] = useState<ThemeName>(settings?.theme ?? 'midnight')
-  const [fontFamily, setFontFamily] = useState<FontFamily>(settings?.fontFamily ?? 'minecraft')
   const [uiScale, setUiScale] = useState(settings?.uiScale ?? 1)
   const [reduceMotion, setReduceMotion] = useState(settings?.reduceMotion ?? false)
 
@@ -41,12 +28,7 @@ export function SetupWizard() {
     setFinishing(false)
   }, [setupOpen, activeAccount?.name])
 
-  const applyPreference = async (patch: {
-    theme?: ThemeName
-    fontFamily?: FontFamily
-    uiScale?: number
-    reduceMotion?: boolean
-  }) => {
+  const applyPreference = async (patch: { uiScale?: number; reduceMotion?: boolean }) => {
     try {
       await saveSettings(patch)
     } catch (settingsError) {
@@ -152,7 +134,7 @@ export function SetupWizard() {
               <span className="field__label">Accessibility</span>
               <div className="setup__a11y-row">
                 <span className="setup__a11y-label">Font size</span>
-                <div className="segmented" role="radiogroup" aria-label="Interface font size">
+                <div className="segmented" role="radiogroup" aria-label="Font size">
                   {FONT_SIZES.map((option) => {
                     const selected = Math.abs(uiScale - option.value) < 0.001
                     return (
@@ -171,46 +153,6 @@ export function SetupWizard() {
                       </button>
                     )
                   })}
-                </div>
-              </div>
-              <div className="setup__a11y-row">
-                <span className="setup__a11y-label">Interface font</span>
-                <div className="segmented" role="radiogroup" aria-label="Interface font">
-                  {INTERFACE_FONTS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={fontFamily === option.value}
-                      className={cx(fontFamily === option.value && 'is-active')}
-                      onClick={() => {
-                        setFontFamily(option.value)
-                        void applyPreference({ fontFamily: option.value })
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="setup__a11y-row">
-                <span className="setup__a11y-label">Theme</span>
-                <div className="segmented" role="radiogroup" aria-label="Launcher theme">
-                  {THEMES.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={theme === option.value}
-                      className={cx(theme === option.value && 'is-active')}
-                      onClick={() => {
-                        setTheme(option.value)
-                        void applyPreference({ theme: option.value })
-                      }}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
                 </div>
               </div>
               <div className="setup__a11y-row">

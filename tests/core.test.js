@@ -14,7 +14,9 @@ import {
   uniqueName,
 } from '../electron/core/util.js'
 import {
+  applicableLibraries,
   collectArgumentEntries,
+  dedupeLibraries,
   getPlatformContext,
   mavenPath,
   rulesAllow,
@@ -257,6 +259,50 @@ test('native-only libraries use their classified jar instead of a missing base a
   assert.equal(entries[0].url, nativeUrl)
   assert.match(path.basename(entries[0].destination), new RegExp(`${classifier}\.jar$`))
   await fs.rm(root, { recursive: true, force: true })
+})
+
+test('loader libraries replace the Mojang build of the same Maven artifact', () => {
+  const libraries = applicableLibraries(
+    {
+      libraries: [
+        { name: 'org.ow2.asm:asm:9.6', downloads: { artifact: { path: 'org/ow2/asm/asm/9.6/asm-9.6.jar' } } },
+        { name: 'org.ow2.asm:asm:9.10.1', url: 'https://maven.fabricmc.net/' },
+      ],
+    },
+    getPlatformContext(),
+  )
+  assert.equal(libraries.length, 1)
+  assert.equal(libraries[0].name, 'org.ow2.asm:asm:9.10.1')
+})
+
+test('native classifiers survive artifact deduplication', () => {
+  const libraries = dedupeLibraries([
+    { name: 'org.lwjgl:lwjgl:3.3.3' },
+    { name: 'org.lwjgl:lwjgl:3.3.3:natives-windows' },
+    { name: 'org.lwjgl:lwjgl:3.3.3:natives-linux' },
+  ])
+  assert.deepEqual(
+    libraries.map((library) => library.name),
+    [
+      'org.lwjgl:lwjgl:3.3.3',
+      'org.lwjgl:lwjgl:3.3.3:natives-windows',
+      'org.lwjgl:lwjgl:3.3.3:natives-linux',
+    ],
+  )
+})
+
+test('an OS-specific loader override leaves the Mojang library when it does not apply', () => {
+  const libraries = applicableLibraries(
+    {
+      libraries: [
+        { name: 'org.ow2.asm:asm:9.6' },
+        { name: 'org.ow2.asm:asm:9.10.1', rules: [{ action: 'allow', os: { name: 'windows' } }] },
+      ],
+    },
+    { os: { name: 'linux', arch: 'x86_64', version: '6.0' }, features: {} },
+  )
+  assert.equal(libraries.length, 1)
+  assert.equal(libraries[0].name, 'org.ow2.asm:asm:9.6')
 })
 
 test('libraries without any download metadata still fall back to Maven coordinates', async () => {

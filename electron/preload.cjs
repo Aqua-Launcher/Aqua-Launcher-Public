@@ -74,6 +74,9 @@ const api = {
       invoke('mods:toggle', { installationId, filename, contentType }),
     remove: (installationId, filename, contentType = 'mod') =>
       invoke('mods:remove', { installationId, filename, contentType }),
+    retargetInfo: (installationId, filename) => invoke('mods:retargetInfo', { installationId, filename }),
+    retarget: (installationId, filename) => invoke('mods:retarget', { installationId, filename }),
+    retargetUndo: (installationId, filename) => invoke('mods:retargetUndo', { installationId, filename }),
     openFolder: (installationId, contentType = 'mod') => invoke('mods:openFolder', { installationId, contentType }),
   },
   minecraftSettings: {
@@ -112,6 +115,14 @@ const api = {
     ping: (address, edition = 'java') => invoke('servers:ping', { address, edition }),
     markJoined: (id) => invoke('servers:markJoined', { id }),
   },
+  horizon: {
+    status: (options = {}) => invoke('horizon:status', options),
+    releases: (options = {}) => invoke('horizon:releases', options),
+    install: (tag) => invoke('horizon:install', { tag }),
+    cancelInstall: () => invoke('horizon:cancelInstall'),
+    launch: (version = null) => invoke('horizon:launch', { version }),
+    openFolder: (kind, version = null) => invoke('horizon:openFolder', { kind, version }),
+  },
   bedrock: {
     status: (options = {}) => invoke('bedrock:status', options),
     launch: (id, serverAddress = null) => invoke('bedrock:launch', { id, serverAddress }),
@@ -128,6 +139,7 @@ const api = {
     openVersionFolder: (version) => invoke('bedrock:openVersionFolder', { version }),
     registerCommand: (version) => invoke('bedrock:registerCommand', { version }),
     registerVersion: (version, options = {}) => invoke('bedrock:registerVersion', { version, ...options }),
+    installVersion: (version) => invoke('bedrock:installVersion', { version }),
     addons: (editionId) => invoke('bedrock:addons', { editionId }),
     importAddon: (editionId, filePath) => invoke('bedrock:importAddon', { editionId, filePath }),
     removeAddon: (editionId, kind, folder) => invoke('bedrock:removeAddon', { editionId, kind, folder }),

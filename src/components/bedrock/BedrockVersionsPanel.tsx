@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   BadgeCheck,
   ChevronDown,
+  CheckCircle2,
   Clock,
   Download,
   FolderOpen,
+  HardDrive,
   HardDriveDownload,
   RefreshCw,
   Search,
@@ -17,6 +19,7 @@ import { formatBytes, relativeTime } from '../../lib/format'
 import { useLauncher } from '../../state/LauncherProvider'
 import type { BedrockCatalogEntry } from '../../lib/types'
 import { Badge, Button, CopyButton, EmptyState, ProgressBar, Spinner } from '../ui/primitives'
+import { InstallBedrockDialog } from './InstallBedrockDialog'
 import { RegisterBedrockDialog } from './RegisterBedrockDialog'
 
 type ChannelFilter = 'release' | 'beta' | 'all'
@@ -28,6 +31,11 @@ const CHANNEL_LABEL: Record<BedrockCatalogEntry['channel'], string> = {
 }
 
 const PAGE_SIZE = 40
+
+/** Windows reports install locations with a trailing separator; downloaded folders have none. */
+function sameFolder(a: string, b: string) {
+  return a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase()
+}
 
 function channelTone(channel: BedrockCatalogEntry['channel']) {
   if (channel === 'beta') return 'beta' as const
@@ -55,11 +63,13 @@ export function BedrockVersionsPanel() {
     removeBedrockVersion,
     openBedrockVersionFolder,
     registerBedrockVersion,
+    installBedrockVersion,
   } = useLauncher()
   const [query, setQuery] = useState('')
   const [channel, setChannel] = useState<ChannelFilter>('release')
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
   const [registerTarget, setRegisterTarget] = useState<string | null>(null)
+  const [installTarget, setInstallTarget] = useState<string | null>(null)
 
   useEffect(() => {
     if (!bedrockVersions) void refreshBedrockVersions(false)
@@ -71,6 +81,14 @@ export function BedrockVersionsPanel() {
 
   const library = useMemo(() => new Map(bedrockLibrary.map((entry) => [entry.version, entry])), [bedrockLibrary])
   const installedEdition = bedrock?.editions[0] ?? null
+  const isInstalled = (version: string) => Boolean(installedEdition?.version) && installedEdition?.version === version
+  // A registered build also sits in the download folder: it is one thing, not two.
+  const registeredFolders = useMemo(
+    () => (bedrock?.editions || []).map((edition) => edition.installLocation || ''),
+    [bedrock],
+  )
+  const isRegistered = (directory: string) =>
+    Boolean(directory) && registeredFolders.some((location) => sameFolder(location, directory))
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -134,6 +152,17 @@ export function BedrockVersionsPanel() {
           const version = registerTarget
           setRegisterTarget(null)
           if (version) void registerBedrockVersion(version, options)
+        }}
+      />
+
+      <InstallBedrockDialog
+        version={installTarget}
+        installedVersion={installedEdition?.version || null}
+        onCancel={() => setInstallTarget(null)}
+        onConfirm={() => {
+          const version = installTarget
+          setInstallTarget(null)
+          if (version) void installBedrockVersion(version)
         }}
       />
 
@@ -207,6 +236,77 @@ export function BedrockVersionsPanel() {
           </div>
         ) : null}
 
+        {bedrockLibrary.length ? (
+          <section className="bedrock-downloads bedrock-downloads--inline">
+            <div className="panel-head">
+              <div>
+                <h2 className="panel-head__title">Downloaded builds</h2>
+                <p className="panel-head__subtitle">
+                  Unpacked in the launcher&rsquo;s own folder. Registering one makes Windows run that build instead of the
+                  Store copy.
+                </p>
+              </div>
+            </div>
+            {bedrockLibrary.map((entry) => {
+              const linked = isRegistered(entry.directory)
+              return (
+                <div className="bedrock-download-row" key={entry.version}>
+                  <div className="grow">
+                    <span className="bedrock-download-row__version">
+                      Bedrock {entry.version}
+                      {linked ? <span className="bedrock-download-row__flag">Registered</span> : null}
+                    </span>
+                    <span className="bedrock-download-row__meta">
+                      {formatBytes(entry.sizeBytes)}
+                      {linked
+                        ? ' · this folder is the installed Minecraft'
+                        : entry.layout === 'appx'
+                          ? ' · ready to register'
+                          : isInstalled(entry.version)
+                            ? ' · installed through Windows'
+                            : ' · Store package, ready to install'}
+                    </span>
+                  </div>
+                  {entry.layout === 'appx' ? (
+                    linked ? null : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon={<CheckCircle2 />}
+                        onClick={() => setRegisterTarget(entry.version)}
+                      >
+                        Register build
+                      </Button>
+                    )
+                  ) : isInstalled(entry.version) ? null : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={<HardDrive />}
+                      onClick={() => setInstallTarget(entry.version)}
+                    >
+                      Install build
+                    </Button>
+                  )}
+                  <Button size="sm" icon={<FolderOpen />} onClick={() => void openBedrockVersionFolder(entry.version)}>
+                    Open folder
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Trash2 />}
+                    disabled={linked}
+                    title={linked ? 'Windows is running this build. Uninstall it in Windows Settings first.' : undefined}
+                    onClick={() => void removeBedrockVersion(entry.version)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              )
+            })}
+          </section>
+        ) : null}
+
         {!bedrockVersions && bedrockVersionsLoading ? (
           <div className="bedrock-rows">
             {Array.from({ length: 6 }).map((_, index) => (
@@ -238,6 +338,7 @@ export function BedrockVersionsPanel() {
               {visible.map((entry) => {
                 const progress = bedrockDownloads[entry.version] ?? null
                 const downloaded = library.get(entry.version) ?? null
+                const linked = downloaded ? isRegistered(downloaded.directory) : false
                 const busy = progress && progress.phase !== 'done' && progress.phase !== 'error' && progress.phase !== 'cancelled'
                 const percent =
                   progress && progress.totalBytes
@@ -258,6 +359,7 @@ export function BedrockVersionsPanel() {
                             {downloaded.layout === 'appx' ? 'Downloaded' : 'Saved'}
                           </Badge>
                         ) : null}
+                        {linked ? <Badge tone="success">Registered</Badge> : null}
                       </span>
                       <span className="bedrock-row__meta text-dim">
                         {busy && progress ? (
@@ -266,7 +368,9 @@ export function BedrockVersionsPanel() {
                               ? 'Finding the package…'
                               : progress.phase === 'extracting'
                                 ? 'Unpacking the build…'
-                                : `${formatBytes(progress.receivedBytes)}${progress.totalBytes ? ` of ${formatBytes(progress.totalBytes)}` : ''}`}
+                                : progress.phase === 'installing'
+                                  ? 'Windows is installing the build…'
+                                  : `${formatBytes(progress.receivedBytes)}${progress.totalBytes ? ` of ${formatBytes(progress.totalBytes)}` : ''}`}
                           </>
                         ) : downloaded ? (
                           <>
@@ -282,7 +386,7 @@ export function BedrockVersionsPanel() {
                           </>
                         ) : (
                           <>
-                            <Clock /> Microsoft Store package — saved for reference, install it through the Store
+                            <Clock /> Store package — installing hands it to Windows, which replaces the current copy
                           </>
                         )}
                       </span>
@@ -307,15 +411,26 @@ export function BedrockVersionsPanel() {
                       ) : downloaded ? (
                         <>
                           {downloaded.layout === 'appx' ? (
+                            linked ? null : (
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                icon={<BadgeCheck />}
+                                onClick={() => setRegisterTarget(entry.version)}
+                              >
+                                Register build
+                              </Button>
+                            )
+                          ) : isInstalled(entry.version) ? null : (
                             <Button
                               size="sm"
                               variant="primary"
-                              icon={<BadgeCheck />}
-                              onClick={() => setRegisterTarget(entry.version)}
+                              icon={<HardDrive />}
+                              onClick={() => setInstallTarget(entry.version)}
                             >
-                              Register build
+                              Install build
                             </Button>
-                          ) : null}
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"
@@ -328,6 +443,8 @@ export function BedrockVersionsPanel() {
                             size="sm"
                             variant="ghost"
                             icon={<Trash2 />}
+                            disabled={linked}
+                            title={linked ? 'Windows is running this build. Uninstall it in Windows Settings first.' : undefined}
                             onClick={() => void removeBedrockVersion(entry.version)}
                           >
                             Remove
