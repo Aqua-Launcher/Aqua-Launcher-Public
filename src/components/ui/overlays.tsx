@@ -138,66 +138,6 @@ export function Modal({
   )
 }
 
-export function Drawer({
-  open,
-  onClose,
-  title,
-  subtitle,
-  children,
-  footer,
-}: {
-  open: boolean
-  onClose: () => void
-  title: ReactNode
-  subtitle?: ReactNode
-  children: ReactNode
-  footer?: ReactNode
-}) {
-  const titleId = useId()
-  const drawerRef = useRef<HTMLDivElement>(null)
-  const previousFocus = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const timer = window.setTimeout(() => {
-      drawerRef.current?.querySelector<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')?.focus()
-    }, 30)
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handler)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener('keydown', handler)
-      previousFocus.current?.focus()
-    }
-  }, [open, onClose])
-
-  if (!open) return null
-  return createPortal(
-    <>
-      <div className="drawer-overlay" onMouseDown={onClose} aria-hidden="true" />
-      <aside ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <div className="drawer__header">
-          <div>
-            <h2 className="modal__title" id={titleId}>
-              {title}
-            </h2>
-            {subtitle ? <p className="modal__subtitle">{subtitle}</p> : null}
-          </div>
-          <IconButton label="Close downloads" onClick={onClose}>
-            <X />
-          </IconButton>
-        </div>
-        <div className="drawer__body">{children}</div>
-        {footer ? <div className="drawer__footer">{footer}</div> : null}
-      </aside>
-    </>,
-    document.body,
-  )
-}
-
 export function ConfirmDialog({
   open,
   title,

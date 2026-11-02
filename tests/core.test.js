@@ -26,8 +26,10 @@ import { createDefaultSettings, validateSettings } from '../electron/core/settin
 import { libraryDownload } from '../electron/core/installer.js'
 import { supportsQuickPlay } from '../electron/core/game.js'
 import {
+  aquaArtworkUrl,
   baseVersionCandidates,
   findDropForText,
+  laterReleasesInLine,
   imageSize,
   normalizeDropName,
   parseDropCardNames,
@@ -39,6 +41,8 @@ import { motdToText, normalizeServerAddress, pingServer } from '../electron/core
 import { WorldsService, parseNbtRoot, readWorldMetadata } from '../electron/core/worlds.js'
 
 test('drop wallpaper matches a version to its game drop', () => {
+  assert.equal(aquaArtworkUrl('1.21.5'), 'https://aqua.ch1n.dev/api/launcher/artwork/1.21.5.png')
+
   // Names are written differently in every source, so matching ignores case,
   // punctuation and the "and" that hides inside escaped entities.
   assert.equal(normalizeDropName('Trails & Tales'), 'trailsandtales')
@@ -100,6 +104,27 @@ test('drop wallpaper matches a version to its game drop', () => {
   assert.deepEqual(baseVersionCandidates('26.3'), ['26.3'])
   assert.deepEqual(baseVersionCandidates('26.4-snapshot-3'), ['26.4-snapshot-3'])
   assert.deepEqual(baseVersionCandidates(''), [])
+})
+
+test('artwork walks forward to the last release of its own update', () => {
+  const versions = [
+    { id: '1.5.2', type: 'release' },
+    { id: '1.6.1', type: 'release' },
+    { id: '1.6.4', type: 'release' },
+    { id: '1.7.6', type: 'release' },
+    { id: '1.7.10', type: 'release' },
+    { id: '1.7.11-pre1', type: 'snapshot' },
+    { id: '1.8.9', type: 'release' },
+    { id: '1.20.2', type: 'release' },
+    { id: '1.20.4', type: 'release' },
+    { id: '1.20.6', type: 'release' },
+  ]
+  assert.deepEqual(laterReleasesInLine(versions, '1.7.6'), ['1.7.10'])
+  assert.deepEqual(laterReleasesInLine(versions, '1.5'), ['1.5.2'])
+  assert.deepEqual(laterReleasesInLine(versions, '1.6'), ['1.6.1', '1.6.4'])
+  assert.deepEqual(laterReleasesInLine(versions, '1.20.1'), ['1.20.2', '1.20.4', '1.20.6'])
+  assert.deepEqual(laterReleasesInLine(versions, '1.9'), [])
+  assert.deepEqual(laterReleasesInLine([], '1.7.6'), [])
 })
 
 test('drop wallpaper picks the best image out of a pack', () => {

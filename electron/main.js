@@ -25,6 +25,8 @@ import { BedrockVersionsService } from './core/bedrock-versions.js'
 import { BlockTextureService } from './core/block-textures.js'
 import { GameManager } from './core/game.js'
 import { HorizonService } from './core/horizon.js'
+import { HorizonRegistryService } from './core/horizon-registry.js'
+import { HorizonNativeBuilder } from './core/horizon-native.js'
 import { InstallationService } from './core/installations.js'
 import { Installer } from './core/installer.js'
 import { JavaService } from './core/java.js'
@@ -239,7 +241,7 @@ async function initialize() {
   logger.setLevel(store.settings.logging.level)
 
   const versionService = new VersionService({ paths, logger })
-  const artworkService = new ArtworkService({ paths, logger })
+  const artworkService = new ArtworkService({ paths, versions: versionService, logger })
   const javaService = new JavaService({ paths, logger })
   const loaderService = new LoaderService({ paths, versionService, javaService, logger })
   const installer = new Installer({ paths, versionService, loaderService, logger })
@@ -283,6 +285,22 @@ async function initialize() {
     emitActivity: () => emitActivity(),
     emitNotification: (notification) => emitNotification(notification),
     emitProgress: (job) => broadcast('horizon-install', job),
+  })
+  const horizonRegistryService = new HorizonRegistryService({
+    paths,
+    horizonService,
+    logger,
+    store,
+    emitActivity: () => emitActivity(),
+  })
+  const horizonNativeBuilder = new HorizonNativeBuilder({
+    paths,
+    horizonService,
+    logger,
+    store,
+    emitProgress: (job) => broadcast('horizon-native', job),
+    emitNotification: (notification) => emitNotification(notification),
+    emitActivity: () => emitActivity(),
   })
   const bedrockAddonsService = new BedrockAddonsService({ logger, bedrockService })
   const bedrockVersionsService = new BedrockVersionsService({
@@ -374,6 +392,8 @@ async function initialize() {
     bedrockVersionsService,
     bedrockAddonsService,
     horizonService,
+    horizonRegistryService,
+    horizonNativeBuilder,
     installationService,
     javaService,
     accountManager,
@@ -463,6 +483,7 @@ app.on('before-quit', () => {
   try {
     services?.accountManager?.dispose()
     services?.horizonService?.dispose()
+    services?.horizonNativeBuilder?.dispose()
     logger?.info('Aqua Launcher shutting down')
   } catch {
     // Ignore shutdown logging failures.

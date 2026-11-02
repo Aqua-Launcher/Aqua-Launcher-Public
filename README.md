@@ -20,13 +20,13 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Bedrock Edition (Windows)** support: Aqua finds Minecraft for Windows and Minecraft Preview in the Microsoft Store packages, shows their versions and data folders, launches them, and lists their worlds alongside Java saves.
 - **Bedrock version browser** that lists the builds Microsoft has published to the Store (releases, beta, and preview channels, 500+ builds), downloads the one you pick into the launcher's own folder, and registers it with Windows so it can be played alongside your Store copy.
 - **Horizon (Rust Edition)** support: Aqua installs Horizon's official Rust client itself, provisions the pinned Minecraft and Java files, prepares the game resources with Horizon's bundled preparer, and starts the client directly. No Horizon launcher is involved.
+- **Horizon mod browser**: Aqua reads Horizon's registry index directly, the way Horizon's own launcher does, so the mods, native bundles, and resource packs behind playhorizon.dev/mods can be searched and installed without a browser view. Files are size- and SHA-256-checked, installed into Horizon's own folders, and their `horizon-mods.txt` switches are managed from the launcher.
 - **Mod loaders** for Fabric, Quilt, Forge, and NeoForge. Fabric and Quilt use their official meta profiles; Forge and NeoForge run their own installers into the launcher's Minecraft root. A loader is selected per installation and its profile version is what gets downloaded and launched.
 - **Minecraft installation pipeline** that resolves inheritance, libraries, natives, assets, and logging configuration, with integrity-checked downloads, verification, and repair. Interrupted installs reuse already-verified files.
 - **Mod updates** via Modrinth's hash lookup: check all installed content at once, update individual files, or update everything, while preserving disabled files.
 - **Launching** with Java detection, Mojang runtime downloads, per-installation memory, JVM and game arguments, custom resolution, and process tracking.
 - **Diagnostics** with the launcher log, per-session game logs, crash reports, filtering, search, copy, open-folder, and export actions.
-- **Settings** for theme, accent, interface scale (80–130%), Java runtime, memory, game directory, download concurrency and speed limits, window mode, arguments, startup behavior, and logging.
-- **Custom block themes** that paint the sidebar, title bar, and window background with Minecraft block textures or plain colours, each with its own opacity and tile size, plus presets and any custom accent colour. Block textures are read from the client jar of an installed version and cached, so the launcher bundles no game art; without an installed version the feature asks for one instead of substituting placeholder textures.
+- **Settings** for interface scale (80–130%), reduce motion, the ambient dashboard scene, Java runtime, memory, game directory, download concurrency and speed limits, window mode, arguments, startup behavior, and logging.
 - **First-run setup** that only asks for a player name. Java, memory, folders, and versions use defaults and are configured later from Settings when needed.
 - **Roadmap & docs** page carrying this README and a feature-level view of the roadmap, so what Aqua does and what is planned next can be read inside the launcher instead of on GitHub.
 
@@ -131,6 +131,24 @@ The build, downloads, game home, and worlds live under `%APPDATA%\Aqua Launcher\
 
 **Play** starts the newest installed build (`horizon-client --resources …`) with the Aqua Horizon game home as its working directory and sets `HORIZON_HOME` for the child. Each build also has its own **Play** button. **Game folder**, **Worlds**, **Builds**, and **Downloads** open Aqua's folders. Because the Rust game runs outside Aqua, Horizon launches have no playtime, log capture, or crash report in Aqua. You still need your own Minecraft: Java Edition copy, which Horizon's preparer reads from the files Aqua installs. [Horizon's site](https://playhorizon.dev/) covers the project.
 
+### Horizon mods
+
+Horizon does not load Fabric or NeoForge jars — it has no Java classes for them to patch. It reads three file types of its own, and Aqua installs each where the Rust client looks for it, under the Horizon game folder beside `options.txt`:
+
+| File | Folder | What it is |
+| --- | --- | --- |
+| `.hmod` | `horizon-mods/` | A content mod: blocks, items, recipes, loot and assets, read when the game starts. |
+| `.hnmod` | `horizon-native-mods/` | A native mod: a Rust mixin bundle Aqua compiles into the game with Rust. |
+| `.zip` | `resourcepacks/` | A resource pack layered over Horizon's resources. |
+
+**Extra content → Horizon Mods → Browse mods** reads the registry behind [playhorizon.dev/mods](https://playhorizon.dev/mods) directly, the way Horizon's own launcher does: search, kind filters, the newest version for Minecraft 26.3, and an **Install** button. The release file's size and SHA-256 are checked, revocations in the registry are respected, and the file lands in the folder above with no separate import step. **Import mod** accepts the same files by hand, and **Open folder** goes to each one.
+
+Horizon keeps switches in `horizon-mods.txt` as `mod.<id>:true` lines. Content mods start off until the Installed list turns them on; native mods run until turned off. Aqua writes that file exactly as the game does and leaves Horizon's key binds alone.
+
+Native `.hnmod` mods are compiled into Horizon by Aqua itself: **Build native game** in the Installed list resolves the Horizon commit the mods pin, downloads that revision's source, applies the mods with `horizon-mixins`, and runs `cargo build --locked` the same way Horizon's launcher does. The finished `native-<revision>-<key>` build is installed beside the release builds and Play starts it like any other. The first build downloads the source (~63 MB) and the crates and can take 20–30 minutes; later builds reuse both.
+
+Rust is downloaded into Aqua on the first build too — a minimal stable toolchain of about 600 MB on disk under `horizon/native/toolchain/`, so rustup does not need to be installed and nothing is added to the system PATH. On Windows Aqua uses the MSVC toolchain when Visual Studio's C++ tools are present and otherwise the GNU toolchain; macOS still needs the Xcode command-line tools for its linker.
+
 ## Worlds and backups
 
 **Worlds & backups** reads each world's `level.dat` to show its real name, game mode, difficulty, Minecraft version, last-played time, file count, and size. From there you can open a world folder, delete a world, or create a ZIP backup.
@@ -156,7 +174,7 @@ The dashboard background and wordmark are replaceable without code changes. Drop
 
 The first matching file wins. If none exists, Aqua falls back to its built-in pixel wordmark and voxel scene. See [`public/artwork/README.md`](public/artwork/README.md) for recommended sizes and composition.
 
-The dashboard background itself prefers the version's own update art. Aqua works out which game drop the selected version belongs to — each version's patch note names its drop — then downloads Mojang's wallpaper pack for that drop, keeps the sharpest wide image, and caches it as a 1920 px JPEG under `cache/artwork/` so it keeps working offline. Newer drops ship text-free wallpapers; older ones only ship the promotional key art. Versions released before the published drops (1.19.4 and older) have no art, so they use `background.*` instead.
+The dashboard background itself prefers the version's own update art. Aqua fetches it from `https://aqua.ch1n.dev/api/launcher/artwork/<version>.png`, checks it is a PNG, and caches it under `cache/artwork/` so it keeps working offline. A release with its own artwork keeps it; a release without art walks forward through its own update line to the file named after the update's last release (1.7.6 asks for 1.7.10, 1.20.1 asks for 1.20.2), while 1.5 never borrows 1.6's art. When the endpoint has no art for a version, Aqua falls back to the older Mojang pipeline: it works out which game drop the version belongs to from that version's patch notes, downloads the drop's wallpaper pack, keeps the sharpest wide image, and caches it as a 1920 px JPEG. Versions released before the published drops (1.19.4 and older) have no art, so they use `background.*` instead.
 
 ## Data locations
 
@@ -243,7 +261,7 @@ This builds the renderer and uses `electron-builder` to produce an installer in 
 - Java detection scans common system locations and Aqua's own runtime folder. You can always select a custom `java.exe` in Settings.
 - The launcher supports vanilla and version metadata that follows the standard Mojang format; mod loaders are not installed automatically.
 - Bedrock support is Windows-only, and only for the Minecraft Store editions. The Store app owns updates, sign-in, and world management, so Aqua detects, launches, and lists it rather than installing or patching it. Bedrock worlds cannot be backed up or deleted from the launcher.
-- Horizon is installed and prepared by Aqua; its launcher is not used. Horizon launches still have no playtime or log/crash tracking, and Horizon accounts, mods, and extra instances stay outside Aqua.
+- Horizon is installed and prepared by Aqua; its launcher is not used. Horizon launches still have no playtime or log/crash tracking, and Horizon accounts and extra instances stay outside Aqua. Horizon mods are managed in the game's own `horizon-mods`, `horizon-native-mods`, and `resourcepacks` folders; native `.hnmod` bundles are compiled into a playable Horizon build by Aqua when Rust and a platform linker are installed.
 - Bedrock game versions are derived from the Store package version (package `1.21.2301.0` is game `1.21.23.01`), because the package does not carry the display version. The raw package version is shown next to it.
 - Downloaded Bedrock builds are unofficial copies of Store packages: APPX builds need Developer Mode (with an administrator prompt as the fallback) to register, MSIXVC builds are installed through Windows and replace the current copy, and the Store can overwrite either on its next update. Only use builds you are entitled to play.
 - Older Bedrock builds that Microsoft has delisted can still be listed, but their packages are no longer served, so downloading them fails with a clear message.

@@ -567,3 +567,125 @@ test('installing refuses APPX builds and builds that were never downloaded', asy
   await assert.rejects(() => service.install('1.21.114.1'), /Register it instead/)
   await assert.rejects(() => service.install('1.21.130.1'), /Download that version first/)
 })
+
+/**
+ * Registration only counts once Windows lists the build that was asked for. A
+ * copy the launcher already registered — or the Store build — staying in the list
+ * is the failure that used to be reported as success.
+ */
+const OLD_BUILD_MANIFEST =
+  '<Package><Identity Name="Microsoft.MinecraftUWP" Publisher="CN=Microsoft" Version="1.9.15.0" /></Package>'
+
+function appxFetch(version, manifestXml) {
+  const zip = new AdmZip()
+  zip.addFile('AppxManifest.xml', Buffer.from(manifestXml))
+  const archive = zip.toBuffer().toString('base64')
+  return async (url) => {
+    if (url.includes('mc-w10-versiondb')) {
+      return { ok: true, text: async () => JSON.stringify([[version, UPDATE_ID, 0]]) }
+    }
+    if (url.includes('GdkLinks')) return { ok: true, text: async () => '{}' }
+    if (url.includes('client.asmx')) return { ok: true, text: async () => 'http://tlu.dl.example.test/x.appx' }
+    return {
+      ok: true,
+      headers: { get: () => null },
+      body: Readable.from([Buffer.from(archive, 'base64')]).pipe(new PassThrough()),
+    }
+  }
+}
+
+function registeredCopy(overrides = {}) {
+  return {
+    id: 'bedrock',
+    name: 'Minecraft for Windows',
+    packageName: 'Microsoft.MinecraftUWP',
+    packageVersion: '1.21.9003.0',
+    version: '1.21.90.03',
+    installLocation: 'C:\\Aqua\\bedrock\\versions\\1.21.90.3',
+    ...overrides,
+  }
+}
+
+test('registering an older build removes the newer registration Windows will not replace', async () => {
+  const calls = []
+  let listed = registeredCopy()
+  const { service, paths } = await createService({
+    fetchImpl: appxFetch('1.9.0.15', OLD_BUILD_MANIFEST),
+    bedrockService: { status: async () => ({ editions: listed ? [listed] : [], developerMode: true }) },
+  })
+  await service.download('1.9.0.15')
+  const folder = path.join(paths.bedrockVersionsRoot, '1.9.0.15')
+  service.run = async (_file, args) => {
+    const command = args.join(' ')
+    calls.push(command)
+    if (command.includes('Remove-AppxPackage')) {
+      listed = null
+      return { ok: true, stdout: '', stderr: '' }
+    }
+    if (command.includes('Add-AppxPackage')) {
+      listed = registeredCopy({ packageVersion: '1.9.15.0', version: '1.9.15', installLocation: folder })
+      return { ok: true, stdout: '', stderr: '' }
+    }
+    return { ok: false, stdout: '', stderr: `unexpected ${command}` }
+  }
+
+  const result = await service.register('1.9.0.15')
+  assert.equal(result.replacedVersion, '1.21.90.03')
+  assert.equal(result.registeredVersion, '1.9.15')
+  assert.equal(result.elevated, false)
+  const removal = calls.findIndex((command) => command.includes('Remove-AppxPackage'))
+  const registration = calls.findIndex((command) => command.includes('Add-AppxPackage'))
+  assert.ok(removal >= 0, 'the newer registration is removed first')
+  assert.ok(removal < registration)
+})
+
+test('a registration Windows does not apply is reported instead of counted as success', async () => {
+  const listed = registeredCopy({ packageVersion: '1.9.0.0', version: '1.9.0.0', installLocation: 'C:\\Store' })
+  const { service } = await createService({
+    fetchImpl: appxFetch('1.9.0.15', OLD_BUILD_MANIFEST),
+    bedrockService: { status: async () => ({ editions: [listed], developerMode: true }) },
+  })
+  await service.download('1.9.0.15')
+  service.run = async () => ({ ok: true, stdout: '', stderr: '' })
+
+  await assert.rejects(() => service.register('1.9.0.15'), /still lists Minecraft 1\.9\.0\.0/)
+})
+
+test('a registration the administrator prompt refuses is not reported as success', async () => {
+  const calls = []
+  const { service } = await createService({
+    fetchImpl: appxFetch('1.9.0.15', OLD_BUILD_MANIFEST),
+    bedrockService: { status: async () => ({ editions: [], developerMode: false }) },
+  })
+  await service.download('1.9.0.15')
+  service.run = async (_file, args) => {
+    calls.push(args.join(' '))
+    return {
+      ok: false,
+      stdout: '',
+      stderr:
+        'Add-AppxPackage : Deployment failed with HRESULT: 0x80073D06, A higher version of this package is already installed.',
+    }
+  }
+
+  await assert.rejects(() => service.register('1.9.0.15'), /0x80073D06/)
+  // The fallback reports the elevated window's own exit code, not the shell's success.
+  assert.ok(calls.some((command) => command.includes('Start-Process')))
+  assert.ok(calls.some((command) => command.includes('-PassThru')))
+})
+
+test('a blocked registration is refused before anything is removed without Developer Mode', async () => {
+  const calls = []
+  const { service } = await createService({
+    fetchImpl: appxFetch('1.9.0.15', OLD_BUILD_MANIFEST),
+    bedrockService: { status: async () => ({ editions: [registeredCopy()], developerMode: false }) },
+  })
+  await service.download('1.9.0.15')
+  service.run = async (_file, args) => {
+    calls.push(args.join(' '))
+    return { ok: true, stdout: '', stderr: '' }
+  }
+
+  await assert.rejects(() => service.register('1.9.0.15'), /Developer Mode/)
+  assert.deepEqual(calls, [])
+})

@@ -22,6 +22,7 @@ import { useLauncher } from '../state/LauncherProvider'
 import type { InstalledMod, ModrinthHit, ModrinthSearchResult, ModUpdatesResult } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { BedrockAddonsPanel } from '../components/bedrock/BedrockAddonsPanel'
+import { HorizonModsPanel } from '../components/horizon/HorizonModsPanel'
 import { ModRetargetDialog } from '../components/mods/ModRetargetDialog'
 import { Button, EmptyState, IconButton, Spinner, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
@@ -32,8 +33,8 @@ function EditionSwitch({
   edition,
   onChange,
 }: {
-  edition: 'java' | 'bedrock'
-  onChange: (edition: 'java' | 'bedrock') => void
+  edition: 'java' | 'bedrock' | 'horizon'
+  onChange: (edition: 'java' | 'bedrock' | 'horizon') => void
 }) {
   return (
     <div className="segmented edition-switch" role="tablist" aria-label="Edition">
@@ -45,6 +46,15 @@ function EditionSwitch({
         onClick={() => onChange('java')}
       >
         <Boxes /> Java Edition
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={edition === 'horizon'}
+        className={edition === 'horizon' ? 'is-active' : undefined}
+        onClick={() => onChange('horizon')}
+      >
+        <Package /> Horizon Mods
       </button>
       <button
         type="button"
@@ -73,8 +83,7 @@ function formatDownloads(value: number) {
 }
 
 export function ModsPage() {
-  const { route, selectedInstallation, openInstallDialog, pushToast, refreshInstallations, setDownloadsOpen } =
-    useLauncher()
+  const { route, selectedInstallation, openInstallDialog, pushToast, refreshInstallations, navigate } = useLauncher()
 
   const loader = selectedInstallation?.loader?.type ?? 'vanilla'
   const moddable = loader !== 'vanilla'
@@ -86,7 +95,7 @@ export function ModsPage() {
   const isModpack = contentType === 'modpack'
   const needsLoader = contentType === 'mod'
 
-  const [edition, setEdition] = useState<'java' | 'bedrock'>('java')
+  const [edition, setEdition] = useState<'java' | 'bedrock' | 'horizon'>('java')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ModrinthSearchResult | null>(null)
   const [searching, setSearching] = useState(false)
@@ -125,6 +134,7 @@ export function ModsPage() {
     } finally {
       setInstalledLoading(false)
     }
+
   }, [contentType, installationId, isModpack, pushToast, typeOption.plural])
 
   useEffect(() => {
@@ -156,6 +166,7 @@ export function ModsPage() {
                   title: `${payload.updates.length} update${payload.updates.length === 1 ? '' : 's'} available`,
                   message: `Checked ${payload.checked} installed ${typeOption.plural} against Modrinth.`,
                 }
+
               : {
                   level: 'success',
                   title: `All ${typeOption.plural} are up to date`,
@@ -240,7 +251,7 @@ export function ModsPage() {
     try {
       const result = await api.mods.installModpack(hit.id)
       await refreshInstallations()
-      setDownloadsOpen(true)
+      navigate('tasks')
       pushToast({
         level: 'success',
         title: `${result.modpack.packName} added`,
@@ -361,6 +372,19 @@ export function ModsPage() {
         />
         <EditionSwitch edition={edition} onChange={setEdition} />
         <BedrockAddonsPanel />
+      </div>
+    )
+  }
+
+  if (edition === 'horizon') {
+    return (
+      <div className="page">
+        <PageHeader
+          title="Extra content"
+          subtitle="Browse playhorizon.dev in the launcher and manage the mods, native bundles, and resource packs Horizon loads."
+        />
+        <EditionSwitch edition={edition} onChange={setEdition} />
+        <HorizonModsPanel />
       </div>
     )
   }

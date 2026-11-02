@@ -173,6 +173,19 @@ export function parsePackageDependencies(xml) {
   return dependencies
 }
 
+/**
+ * The package name and version a downloaded build declares in its own manifest.
+ * Registering a build only counts when Windows lists this exact version.
+ */
+export function parseManifestIdentity(xml) {
+  const text = String(xml ?? '')
+  const identity = /<Identity\b([^>]*)>/i.exec(text)?.[1]
+  if (!identity) return { name: null, version: null }
+  const name = /Name="([^"]+)"/i.exec(identity)?.[1]?.trim() || null
+  const declared = /Version="([^"]+)"/i.exec(identity)?.[1]?.trim() || null
+  return { name, version: declared && /^\d+(\.\d+){1,3}$/.test(declared) ? declared : null }
+}
+
 /** Dotted version comparison, used to check MinVersion requirements. */
 export function comparePackageVersions(a, b) {
   const left = String(a ?? '').split('.').map((part) => Number(part) || 0)
@@ -604,6 +617,70 @@ export class BedrockVersionsService {
     }
   }
 
+  /** The package name and version a downloaded build declares about itself. */
+  async manifestIdentity(version) {
+    const directory = this.versionDirectory(version)
+    const xml = await fsp.readFile(path.join(directory, 'AppxManifest.xml'), 'utf8').catch(() => null)
+    return { ...parseManifestIdentity(xml), directory }
+  }
+
+  /** The edition Windows currently lists for the build's package family. */
+  async registeredState(identity) {
+    const state = await this.bedrockService.status({ force: true }).catch(() => null)
+    const editions = state?.editions || []
+    const name = String(identity.name || '').toLowerCase()
+    const edition = name
+      ? editions.find((item) => String(item.packageName || '').toLowerCase() === name) || null
+      : editions.find((item) => item.id === 'bedrock') || null
+    return { editions, edition, developerMode: state?.developerMode ?? null }
+  }
+
+  /** Whether the listed edition really is the build that was just registered. */
+  isRegisteredBuild(edition, identity, directory) {
+    if (!edition) return false
+    if (identity.version) return String(edition.packageVersion || '') === identity.version
+    if (!edition.installLocation) return false
+    const location = path.resolve(edition.installLocation)
+    return location === directory || isPathInside(location, directory)
+  }
+
+  /** Windows updates its package database behind the deployment call, so re-ask. */
+  async waitForRegistration(identity, directory, attempts = 3) {
+    let state = await this.registeredState(identity)
+    for (let attempt = 1; attempt < attempts && !this.isRegisteredBuild(state.edition, identity, directory); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      state = await this.registeredState(identity)
+    }
+    return state
+  }
+
+  /**
+   * Windows keeps the copy it already has registered, so neither an older build
+   * nor a second copy of the same version can take the package family over until
+   * that registration is removed.
+   */
+  async removeRegistration(edition) {
+    const name = String(edition?.packageName || '').replace(/[^A-Za-z0-9._-]/g, '')
+    if (!name) {
+      return { ok: false, stdout: '', stderr: '', message: 'Windows did not report the registered package name.' }
+    }
+    const result = await this.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$ErrorActionPreference = 'Stop'; Get-AppxPackage -Name '${name}' | Remove-AppxPackage`,
+      ],
+      { timeout: 15 * 60 * 1000 },
+    )
+    this.logger?.info('Removed the registered Bedrock package to make room for another build', {
+      package: name,
+      ok: result.ok,
+    })
+    return result
+  }
+
   /**
    * Registers the unpacked build for this Windows account. With Developer Mode on
    * the deployment runs unelevated, as the signed-in user — which matters on a
@@ -614,6 +691,7 @@ export class BedrockVersionsService {
   async register(version, { ignoreMissingDependencies = false } = {}) {
     if (process.platform !== 'win32') throw new Error('Registering a Bedrock build needs Windows.')
     const { manifest, command } = await this.registerCommand(version)
+    const identity = await this.manifestIdentity(version)
 
     let ignored = []
     let missing = await this.missingDependencies(version)
@@ -629,6 +707,32 @@ export class BedrockVersionsService {
       missing = await this.missingDependencies(version)
       if (missing.length) {
         throw new Error(`Windows is missing ${missing.map((dependency) => dependency.name).join(', ')}.`)
+      }
+    }
+
+    // Windows refuses a build it already has at the same or a newer version and
+    // keeps listing that copy afterwards, which reads as a silent failure, so the
+    // registered copy goes first. That is what the confirmation describes: the
+    // Store copy stops working until it is installed again.
+    let replacedVersion = null
+    const before = await this.registeredState(identity)
+    if (before.edition && !this.isRegisteredBuild(before.edition, identity, identity.directory)) {
+      const current = String(before.edition.packageVersion || '')
+      const blocked = identity.version && current ? comparePackageVersions(current, identity.version) >= 0 : false
+      if (blocked) {
+        const currentLabel = before.edition.version || current
+        if (before.developerMode === false) {
+          throw new Error(
+            `Windows already has Minecraft ${currentLabel} registered, and without Developer Mode registration runs as an administrator. Turn on Developer Mode, remove Minecraft in Windows Settings, then register this build.`,
+          )
+        }
+        const removal = await this.removeRegistration(before.edition)
+        if (!removal.ok) {
+          throw new Error(
+            `Windows has Minecraft ${currentLabel} registered and would not remove it (${describeDeploymentFailure(removal)}). Remove it in Windows Settings, then register again.`,
+          )
+        }
+        replacedVersion = currentLabel
       }
     }
 
@@ -650,16 +754,27 @@ export class BedrockVersionsService {
       }
     }
 
-    // Registration is only real once Windows lists the package.
-    const state = await this.bedrockService.status({ force: true }).catch(() => null)
-    const registered = state?.editions?.[0] || null
-    if (!registered) {
+    // Registration is only real once Windows lists this exact build: a Store or
+    // earlier registered copy staying in the list is not a success.
+    const state = await this.waitForRegistration(identity, identity.directory)
+    if (!this.isRegisteredBuild(state.edition, identity, identity.directory)) {
+      const detected = state.edition?.version || state.edition?.packageVersion || null
+      this.logger?.warn('A Bedrock build was not registered', { version, detected })
       throw new Error(
-        describeDeploymentFailure(result) ||
-          'Windows did not list the build after registering it. Check Developer Mode and try again.',
+        detected
+          ? `Windows still lists Minecraft ${detected}, not this build. Remove it in Windows Settings, then register again.`
+          : describeDeploymentFailure(result) ||
+            'Windows did not list the build after registering it. Check Developer Mode and try again.',
       )
     }
-    this.logger?.info('Registered a Bedrock build', { version, elevated, detected: registered.version })
+
+    const registered = state.edition
+    this.logger?.info('Registered a Bedrock build', {
+      version,
+      elevated,
+      detected: registered.version,
+      replaced: replacedVersion,
+    })
     this.progress(version, { phase: 'done', receivedBytes: 0, totalBytes: null })
     return {
       version,
@@ -667,6 +782,7 @@ export class BedrockVersionsService {
       command,
       elevated,
       ignoredDependencies: ignored,
+      replacedVersion,
       registeredVersion: registered.version || null,
       packageVersion: registered.packageVersion || null,
     }
@@ -698,34 +814,59 @@ export class BedrockVersionsService {
     return missing.map((dependency) => dependency.name)
   }
 
-  /** The administrator path, for PCs without Developer Mode. */
+  /**
+   * The administrator path, for PCs without Developer Mode. The window's exit
+   * code and transcript come back, because the elevated process is what fails —
+   * the launcher's own Start-Process call succeeds either way.
+   */
   async runElevated(version, manifest, command) {
-    const scriptPath = path.join(path.dirname(manifest), 'register.ps1')
+    const directory = path.dirname(manifest)
+    const scriptPath = path.join(directory, 'register.ps1')
+    const logPath = path.join(directory, 'register.log')
     await fsp.writeFile(
       scriptPath,
       [
         '$ErrorActionPreference = "Stop"',
-        `Write-Host "Registering Bedrock ${version}..."`,
-        'Write-Host "This replaces the Microsoft Store copy of Minecraft for Windows for this account."',
-        'Write-Host "To undo it, open the Microsoft Store, find Minecraft for Windows under Library, and install it again."',
-        command,
-        'Write-Host "Done. Aqua can now launch this build."',
-        'Start-Sleep -Seconds 4',
+        `Start-Transcript -Path "${logPath}" -Force | Out-Null`,
+        'try {',
+        `  Write-Host "Registering Bedrock ${version}..."`,
+        '  Write-Host "This replaces the Microsoft Store copy of Minecraft for Windows for this account."',
+        '  Write-Host "To undo it, open the Microsoft Store, find Minecraft for Windows under Library, and install it again."',
+        `  ${command}`,
+        '  Write-Host "Done. Aqua can now launch this build."',
+        '  Start-Sleep -Seconds 4',
+        '  Stop-Transcript | Out-Null',
+        '  exit 0',
+        '} catch {',
+        '  Write-Host "Registration failed: $($_.Exception.Message)"',
+        '  Start-Sleep -Seconds 8',
+        '  Stop-Transcript | Out-Null',
+        '  exit 1',
+        '}',
         '',
       ].join('\n'),
       'utf8',
     )
     const quoted = scriptPath.replace(/'/g, "''")
-    return this.run(
+    const wrapper = [
+      "$ErrorActionPreference = 'Stop'",
+      'try {',
+      `  $p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','${quoted}')`,
+      '  exit [int]$p.ExitCode',
+      '} catch {',
+      '  [Console]::Error.WriteLine($_.Exception.Message)',
+      '  exit 1',
+      '}',
+    ].join('\n')
+    const result = await this.run(
       'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','${quoted}')`,
-      ],
+      ['-NoProfile', '-NonInteractive', '-Command', wrapper],
       { timeout: 15 * 60 * 1000 },
     )
+    // The transcript is where Windows writes the deployment error, and the
+    // elevated window's own output never reaches this process.
+    const transcript = await fsp.readFile(logPath, 'utf8').catch(() => '')
+    return { ...result, stdout: `${result.stdout || ''}\n${transcript}`.trim() }
   }
 }
 

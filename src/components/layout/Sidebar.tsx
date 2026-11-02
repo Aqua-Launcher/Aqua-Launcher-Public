@@ -1,6 +1,5 @@
 import { Fragment, useState } from 'react'
 import {
-  Boxes,
   ChevronRight,
   Download,
   Gamepad2,
@@ -8,6 +7,7 @@ import {
   Home,
   Layers,
   Map,
+  Package,
   ScrollText,
   Server,
   Settings,
@@ -18,7 +18,7 @@ import { MICROSOFT_AUTH_ENABLED } from '../../lib/features'
 import { useLauncher } from '../../state/LauncherProvider'
 import { useNow } from '../../lib/hooks'
 import { elapsedSince } from '../../lib/format'
-import { Avatar, ProgressBar, cx } from '../ui/primitives'
+import { Avatar, cx } from '../ui/primitives'
 import { AquaWordmark } from '../brand/Brand'
 import type { PageName } from '../../lib/types'
 
@@ -27,8 +27,7 @@ const NAV_ITEMS: Array<{ page: PageName; label: string; icon: typeof Home }> = [
   { page: 'installations', label: 'Installations', icon: Layers },
   { page: 'worlds', label: 'Worlds & backups', icon: Globe2 },
   { page: 'servers', label: 'Servers', icon: Server },
-  { page: 'versions', label: 'Versions', icon: Boxes },
-  { page: 'mods', label: 'Extra content', icon: Download },
+  { page: 'mods', label: 'Extra content', icon: Package },
   { page: 'account', label: 'Account', icon: UserRound },
   { page: 'logs', label: 'Logs & diagnostics', icon: ScrollText },
   { page: 'docs', label: 'Roadmap & docs', icon: Map },
@@ -41,10 +40,7 @@ export function Sidebar() {
     navigate,
     activeAccount,
     activeJobs,
-    jobs,
     game,
-    downloadsOpen,
-    setDownloadsOpen,
     openAuth,
     data,
   } = useLauncher()
@@ -52,10 +48,6 @@ export function Sidebar() {
   const activeContentType = route.params?.contentType ?? 'mod'
   const gameActive = game.status === 'running' || game.status === 'preparing'
   useNow(gameActive)
-
-  const primaryJob = activeJobs[0] || null
-  const finishedJobs = jobs.filter((job) => job.status === 'completed' || job.status === 'failed').length
-  const totalJobs = activeJobs.length + finishedJobs
 
   const handleAccount = () => {
     if (activeAccount) navigate('account')
@@ -155,35 +147,24 @@ export function Sidebar() {
 
         <button
           type="button"
-          className={cx('sidebar__downloads', downloadsOpen && 'is-open')}
-          onClick={() => setDownloadsOpen(!downloadsOpen)}
-          aria-expanded={downloadsOpen}
+          className={cx('sidebar__tasks', route.page === 'tasks' && 'is-open')}
+          onClick={() => navigate('tasks')}
+          aria-current={route.page === 'tasks' ? 'page' : undefined}
+          title="Tasks"
         >
-          <span className="sidebar__downloads-icon">
+          <span className="sidebar__tasks-icon">
             <Download />
           </span>
-          <span className="sidebar__downloads-copy">
-            <span className="sidebar__downloads-title">
-              Downloads
-              {activeJobs.length > 0 ? <span className="sidebar__count">{activeJobs.length}</span> : null}
-            </span>
-            <span className="sidebar__downloads-meta">
-              {primaryJob
-                ? primaryJob.progress != null
-                  ? `${primaryJob.progress}% · ${primaryJob.stage}`
-                  : primaryJob.stage
-                : totalJobs > 0
-                  ? `${finishedJobs} recent`
-                  : 'Nothing queued'}
+          <span className="sidebar__tasks-copy">
+            <span className="sidebar__tasks-title">Tasks</span>
+            <span className="sidebar__tasks-meta">
+              {activeJobs.length > 0
+                ? `${activeJobs.length} running`
+                : 'Downloads, builds and scans'}
             </span>
           </span>
           <ChevronRight size={14} className="sidebar__chevron" />
         </button>
-        {primaryJob ? (
-          <div className="sidebar__download-progress">
-            <ProgressBar value={primaryJob.progress} thin label="Current download" />
-          </div>
-        ) : null}
 
         <button type="button" className="sidebar__account" onClick={handleAccount} aria-label={activeAccount ? 'Open account' : 'Add a player profile'}>
           <Avatar name={activeAccount?.name} src={activeAccount?.avatarDataUrl} size="md" />

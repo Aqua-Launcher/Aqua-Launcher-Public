@@ -19,6 +19,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
+import { bedrockDropVersion, HORIZON_DROP_VERSION } from '../lib/artwork'
 import { useNow } from '../lib/hooks'
 import {
   elapsedSince,
@@ -37,7 +38,7 @@ import { TitleArtwork, useHeroArtwork } from '../components/brand/Artwork'
 import { AccountSwitcherToggle } from '../components/home/AccountSwitcherToggle'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
-import { EmptyState, ProgressBar, Spinner, cx } from '../components/ui/primitives'
+import { EmptyState, Spinner, cx } from '../components/ui/primitives'
 
 function greetingForHour(hour: number) {
   if (hour < 5) return 'Good night'
@@ -108,7 +109,16 @@ export function HomePage() {
   const targetIsBedrock = Boolean(bedrockTarget)
   const targetIsHorizon = !targetIsBedrock && Boolean(horizonTarget)
   const targetIsJava = !targetIsBedrock && !targetIsHorizon
-  const heroArtwork = useHeroArtwork(targetIsJava ? selectedInstallation?.versionId : null)
+  // Bedrock builds carry their own numbers, so the hero asks for the Java drop
+  // they belong to. Horizon follows one drop for now; its build names it.
+  const heroVersion = targetIsJava
+    ? selectedInstallation?.versionId
+    : targetIsBedrock
+      ? bedrockDropVersion(bedrockTarget?.version)
+      : horizonTarget
+        ? horizonTarget.gameVersion || HORIZON_DROP_VERSION
+        : null
+  const heroArtwork = useHeroArtwork(heroVersion)
   useNow(gameRunning || gamePreparing)
 
   const [recentServers, setRecentServers] = useState<ServerEntry[]>([])
@@ -429,7 +439,6 @@ export function HomePage() {
                         {installJob.stage}
                         {installJob.etaSeconds != null ? ` · ${formatEta(installJob.etaSeconds)} left` : ''}
                       </div>
-                      <ProgressBar value={installJob.progress} thin label="Installation progress" />
                     </>
                   ) : isPreparingSelected ? (
                     <>
@@ -638,12 +647,14 @@ export function HomePage() {
           </span>
           <ChevronRight />
         </button>
-        <button type="button" className="quick-tile" onClick={() => navigate('versions')}>
-          <span className="quick-tile__icon"><Boxes /></span>
+        <button type="button" className="quick-tile" onClick={() => openInstallDialog({ mode: 'create' })}>
+          <span className="quick-tile__icon"><Plus /></span>
           <span className="quick-tile__copy">
-            <span className="quick-tile__title">Versions</span>
+            <span className="quick-tile__title">New installation</span>
             <span className="quick-tile__meta">
-              {versions ? `${versions.versions.length.toLocaleString()} versions available` : 'Releases and snapshots'}
+              {versions
+                ? `${versions.versions.length.toLocaleString()} Java versions · Bedrock · Horizon`
+                : 'Java, Bedrock or Horizon'}
             </span>
           </span>
           <ChevronRight />

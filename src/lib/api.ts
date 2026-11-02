@@ -9,6 +9,13 @@ import type {
   HorizonInstallJob,
   HorizonLaunchResult,
   HorizonReleaseCatalog,
+  HorizonModImportResult,
+  HorizonModKind,
+  HorizonModsResult,
+  HorizonNativeJob,
+  HorizonNativeStatus,
+  HorizonProjectInstallResult,
+  HorizonRegistryResult,
   HorizonStatus,
   InstalledContentResult,
   Installation,
@@ -197,6 +204,16 @@ export interface AquaApi {
     cancelInstall: () => Promise<HorizonInstallJob>
     launch: (version?: string | null) => Promise<HorizonLaunchResult>
     openFolder: (kind: HorizonFolderKind, version?: string | null) => Promise<string>
+    mods: () => Promise<HorizonModsResult>
+    importMod: (filePath: string) => Promise<HorizonModImportResult>
+    toggleMod: (filename: string, kind: HorizonModKind) => Promise<{ filename: string; enabled: boolean }>
+    removeMod: (filename: string, kind: HorizonModKind) => Promise<{ filename: string; kind: HorizonModKind }>
+    modsFolder: (kind?: HorizonModKind) => Promise<string>
+    registry: (options?: { force?: boolean }) => Promise<HorizonRegistryResult>
+    installProject: (projectId: string, version?: string | null) => Promise<HorizonProjectInstallResult>
+    nativeStatus: () => Promise<HorizonNativeStatus>
+    buildNative: (profile?: 'fast' | 'release' | null) => Promise<HorizonNativeJob>
+    cancelNativeBuild: () => Promise<HorizonNativeJob>
   }
   bedrock: {
     status: (options?: { force?: boolean }) => Promise<BedrockStatus>
@@ -259,6 +276,7 @@ export interface AquaApi {
     chooseDirectory: (options?: { title?: string; defaultPath?: string }) => Promise<string | null>
     chooseJava: () => Promise<string | null>
     chooseAddon: () => Promise<string | null>
+    chooseHorizonMod: () => Promise<string | null>
   }
   events: {
     subscribe: (handler: (event: { type: string; payload: unknown }) => void) => () => void
@@ -295,4 +313,5 @@ export type EventPayloadMap = {
   'horizon-install': HorizonInstallJob
   'storage:progress': StorageProgress
   'bedrock-addons': { editionId: string; installed: string[]; filename: string }
+  'horizon-native': HorizonNativeJob
 }

@@ -24,6 +24,10 @@ release
 *.njsproj
 *.sln
 *.sw?
+*.cloud-attachments
+*.freebuff
+*.work
+*.vs
 
 # Local testing artifacts
 screenshots

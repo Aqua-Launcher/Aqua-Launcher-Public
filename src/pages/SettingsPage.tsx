@@ -104,7 +104,6 @@ function SettingsWorkspace({
     refreshJava,
     saveSettings,
     pushToast,
-    setDownloadsOpen,
     navigate,
     selectedInstallation,
   } = launcher
@@ -353,9 +352,9 @@ function SettingsWorkspace({
       pushToast({
         level: 'info',
         title: `Installing Java ${option.major}`,
-        message: 'Progress is available in the downloads panel.',
+        message: 'Progress is available on the Tasks page.',
       })
-      setDownloadsOpen(true)
+      navigate('tasks')
     } catch (error) {
       pushToast({ level: 'error', title: 'Could not start Java install', message: getErrorMessage(error) })
     }
@@ -423,10 +422,6 @@ function SettingsWorkspace({
               </button>
             )
           })}
-          <div className="settings-nav__note">
-            <ShieldCheck />
-            <span>Stored locally</span>
-          </div>
         </nav>
 
         <div className="settings-content">
@@ -885,7 +880,7 @@ function SettingsWorkspace({
                 title="Download diagnostics"
                 description="See active downloads, speeds, remaining time, and retry failed installs."
               >
-                <Button size="sm" icon={<Download />} onClick={() => setDownloadsOpen(true)}>
+                <Button size="sm" icon={<Download />} onClick={() => navigate('tasks')}>
                   Open downloads
                 </Button>
               </FieldRow>

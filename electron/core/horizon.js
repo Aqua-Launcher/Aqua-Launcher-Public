@@ -18,6 +18,7 @@ import {
   isPathInside,
   randomId,
   readJsonFile,
+  sanitizeFileName,
 } from './util.js'
 
 const RELEASES_URL = 'https://api.github.com/repos/horizon-rust/horizon/releases?per_page=100'
@@ -28,6 +29,7 @@ const GITHUB_HEADERS = {
 }
 const RELEASE_CACHE_TTL_MS = 10 * 60 * 1000
 const RELEASE_TAG = /^v\d+\.\d+\.\d+$/
+const NATIVE_TAG = /^native-[0-9a-f]{7}-[0-9a-f]{12}$/
 const GAME_VERSION = /^[0-9][0-9a-z.-]{0,31}$/i
 const COMPLETE_MARKER = '.aqua-horizon.json'
 const RESOURCES_MANIFEST = 'horizon-resources.json'
@@ -39,6 +41,22 @@ const PREPARE_TIMEOUT_MS = 45 * 60 * 1000
 export const HORIZON_GAME_VERSION = '26.3'
 export const HORIZON_SITE_URL = 'https://playhorizon.dev/'
 export const HORIZON_FOLDER_KINDS = ['game', 'worlds', 'builds', 'build', 'downloads']
+
+/**
+ * Horizon's own mod layout, beside options.txt in the game home. A content mod
+ * is a .hmod in `horizon-mods/`, a native mod is a .hnmod bundle the launcher
+ * installs into `horizon-native-mods/`, resource packs are .zip files in
+ * `resourcepacks/`, and `horizon-mods.txt` holds `mod.<id>:true` switches.
+ * Jars from other launchers never load, so they are not accepted here.
+ */
+export const HORIZON_MODS_FILE = 'horizon-mods.txt'
+export const HORIZON_CONTENT_MODS_DIR = 'horizon-mods'
+export const HORIZON_NATIVE_MODS_DIR = 'horizon-native-mods'
+export const HORIZON_RESOURCE_PACKS_DIR = 'resourcepacks'
+export const HORIZON_MOD_KINDS = ['content', 'native', 'resourcepack']
+export const HORIZON_MODS_URL = 'https://playhorizon.dev/mods'
+export const HORIZON_NATIVE_NOTE =
+  'Installed, not built into this game: Horizon runs native mods only in a game its own launcher builds.'
 
 const DROP_NAMES = {
   '26.3': 'Wilderness Bound',
@@ -408,13 +426,14 @@ export async function readInstalledHorizonBuilds({
 
   const builds = []
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || !RELEASE_TAG.test(entry.name)) continue
+    const native = NATIVE_TAG.test(entry.name)
+    if (!entry.isDirectory() || entry.isSymbolicLink() || (!RELEASE_TAG.test(entry.name) && !native)) continue
     const tag = entry.name
     const directory = path.join(versionsRoot, tag)
     const markerStat = await fsp.stat(path.join(directory, COMPLETE_MARKER)).catch(() => null)
     if (!markerStat?.isFile()) continue
     const marker = await readJsonCapped(path.join(directory, COMPLETE_MARKER))
-    if (!marker || marker.kind !== 'aqua-horizon' || marker.tag !== tag) continue
+    if (!marker || marker.kind !== (native ? 'aqua-horizon-native' : 'aqua-horizon') || marker.tag !== tag) continue
     const clientPath = await firstExisting(horizonClientCandidates(directory, platform))
     if (!clientPath) continue
     const lock = await readJsonCapped(path.join(directory, 'research-lock.json'))
@@ -436,6 +455,11 @@ export async function readInstalledHorizonBuilds({
       assetName: typeof marker.assetName === 'string' ? marker.assetName : null,
       javaMajor: Number(marker.javaMajor) || null,
       warning: typeof marker.warning === 'string' ? marker.warning : null,
+      native,
+      baseTag: native && typeof marker.baseTag === 'string' ? marker.baseTag : null,
+      revision: native && typeof marker.revision === 'string' ? marker.revision : null,
+      profile: native && typeof marker.profile === 'string' ? marker.profile : null,
+      nativeMods: native && Array.isArray(marker.mods) ? marker.mods.length : 0,
     })
   }
 
@@ -450,6 +474,157 @@ export async function readInstalledHorizonBuilds({
 export function selectedHorizonBuild(builds, selected = null) {
   if (!Array.isArray(builds) || builds.length === 0) return null
   return builds.find((build) => build.tag === selected) || builds[0]
+}
+
+const MOD_ID = /^[a-z0-9_]{1,64}$/
+
+/** Which Horizon folder a downloaded file belongs in, from its extension. */
+export function horizonModKind(filename) {
+  const name = String(filename ?? '').toLowerCase()
+  if (name.endsWith('.hnmod')) return 'native'
+  if (name.endsWith('.hmod')) return 'content'
+  if (name.endsWith('.zip')) return 'resourcepack'
+  return null
+}
+
+/** A file name's mod id, used when its manifest cannot be read. */
+export function horizonModId(filename) {
+  return path.parse(String(filename ?? '')).name || 'mod'
+}
+
+/** `appleskin-0.1.1.hnmod` reads as `appleskin 0.1.1` until a manifest names it. */
+export function horizonModTitle(filename) {
+  return horizonModId(filename).replace(/[_-]+/g, ' ').trim() || 'Horizon mod'
+}
+
+/** `horizon-mods.txt`: `mod.<id>:true` lines plus the player's key binds. */
+export function parseHorizonModState(text) {
+  const enabled = new Set()
+  const disabled = new Set()
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const separator = line.indexOf(':')
+    if (separator <= 0) continue
+    const key = line.slice(0, separator).trim()
+    const value = line.slice(separator + 1).trim()
+    if (!key.startsWith('mod.') || (value !== 'true' && value !== 'false')) continue
+    if (value === 'true') enabled.add(key.slice('mod.'.length))
+    else disabled.add(key.slice('mod.'.length))
+  }
+  return { enabled, disabled }
+}
+
+/** Rewrites one mod's switch and keeps Horizon's key binds intact. */
+export function setHorizonModState(text, id, enabled) {
+  const key = `mod.${id}`
+  const line = `${key}:${enabled ? 'true' : 'false'}`
+  const kept = []
+  let written = false
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    const separator = trimmed.indexOf(':')
+    if (separator > 0 && trimmed.slice(0, separator).trim() === key) {
+      if (!written) kept.push(line)
+      written = true
+      continue
+    }
+    kept.push(trimmed)
+  }
+  if (!written) kept.push(line)
+  return kept.length ? `${kept.join('\n')}\n` : ''
+}
+
+/** Drops a removed mod's switch, leaving every other line alone. */
+export function removeHorizonModState(text, id) {
+  const key = `mod.${id}`
+  const kept = String(text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false
+      const separator = line.indexOf(':')
+      return separator <= 0 || line.slice(0, separator).trim() !== key
+    })
+  return kept.length ? `${kept.join('\n')}\n` : ''
+}
+
+function archiveText(entry) {
+  if (!entry) return null
+  const size = Number(entry.header?.size) || 0
+  if (size <= 0 || size > 128 * 1024) return null
+  return entry.getData().toString('utf8')
+}
+
+function tomlValue(text, key) {
+  const match = String(text ?? '').match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]*)"`, 'm'))
+  return match ? match[1].trim() || null : null
+}
+
+function cleanModId(value) {
+  const text = String(value ?? '').trim()
+  return MOD_ID.test(text) ? text : null
+}
+
+/**
+ * Horizon reads its own manifests: `horizon-native.json` in a .hnmod,
+ * `horizon-mod.toml` in a .hmod, and `pack.mcmeta` in a resource pack. A file
+ * without one is not something Horizon would load, so it is refused.
+ */
+export async function readHorizonModManifest(filePath, kind) {
+  try {
+    const zip = new AdmZip(filePath)
+    if (kind === 'native') {
+      const text = archiveText(zip.getEntry('horizon-native.json'))
+      if (!text) return null
+      const parsed = JSON.parse(text)
+      if (!parsed || typeof parsed !== 'object') return null
+      return {
+        id: cleanModId(parsed.id),
+        name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : null,
+        version: typeof parsed.version === 'string' ? parsed.version : null,
+        game: typeof parsed.game === 'string' ? parsed.game : null,
+        horizon: /^[0-9a-f]{40}$/i.test(String(parsed.horizon ?? '')) ? String(parsed.horizon).toLowerCase() : null,
+        mixins: /^[0-9a-f]{40}$/i.test(String(parsed.mixins ?? '')) ? String(parsed.mixins).toLowerCase() : null,
+        hooks: Number.isFinite(Number(parsed.hooks)) ? Number(parsed.hooks) : null,
+      }
+    }
+    if (kind === 'content') {
+      const text = archiveText(zip.getEntry('horizon-mod.toml'))
+      if (!text) return null
+      return {
+        id: cleanModId(tomlValue(text, 'id')),
+        name: tomlValue(text, 'name'),
+        version: tomlValue(text, 'version'),
+        game: null,
+      }
+    }
+    const text = archiveText(zip.getEntry('pack.mcmeta'))
+    if (!text) return null
+    const parsed = JSON.parse(text)
+    const description = parsed?.pack?.description
+    return {
+      id: null,
+      name: typeof description === 'string' && description.trim() ? description.trim().slice(0, 160) : null,
+      version: null,
+      game: null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function requireHorizonModKind(value) {
+  const kind = String(value ?? '')
+  if (!HORIZON_MOD_KINDS.includes(kind)) throw new Error('Unknown Horizon mod type.')
+  return kind
+}
+
+function requireHorizonModFileName(value) {
+  if (typeof value !== 'string' || !value.trim() || path.basename(value) !== value) {
+    throw new Error('That Horizon mod file is invalid.')
+  }
+  if (!horizonModKind(value)) throw new Error('Horizon mods must be .hnmod, .hmod, or .zip resource packs.')
+  return value
 }
 
 function stripAnsi(value) {
@@ -688,6 +863,177 @@ export class HorizonService {
       if (error) throw new Error(error)
     }
     return target
+  }
+
+  /** The folders and state file Horizon itself reads, beside options.txt. */
+  modsDirectories() {
+    const roots = this.roots()
+    return {
+      gameHome: roots.gameHome,
+      content: path.join(roots.gameHome, HORIZON_CONTENT_MODS_DIR),
+      native: path.join(roots.gameHome, HORIZON_NATIVE_MODS_DIR),
+      resourcepack: path.join(roots.gameHome, HORIZON_RESOURCE_PACKS_DIR),
+      stateFile: path.join(roots.gameHome, HORIZON_MODS_FILE),
+    }
+  }
+
+  async readModState(directories = this.modsDirectories()) {
+    const text = await fsp.readFile(directories.stateFile, 'utf8').catch(() => '')
+    return { text, state: parseHorizonModState(text) }
+  }
+
+  /** Every mod Horizon would find in its game home, with its switch state. */
+  async listMods() {
+    const directories = this.modsDirectories()
+    await ensureDir(directories.gameHome)
+    const { state } = await this.readModState(directories)
+    const mods = []
+    for (const [kind, directory] of [
+      ['content', directories.content],
+      ['native', directories.native],
+      ['resourcepack', directories.resourcepack],
+    ]) {
+      let entries = []
+      try {
+        entries = await fsp.readdir(directory, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.isSymbolicLink()) continue
+        if (horizonModKind(entry.name) !== kind) continue
+        const filePath = path.join(directory, entry.name)
+        const stat = await fsp.stat(filePath).catch(() => null)
+        if (!stat?.isFile()) continue
+        const manifest = await readHorizonModManifest(filePath, kind)
+        const id = manifest?.id || horizonModId(entry.name)
+        mods.push({
+          filename: entry.name,
+          title: manifest?.name || horizonModTitle(entry.name),
+          kind,
+          id,
+          version: manifest?.version || null,
+          size: stat.size,
+          modified: stat.mtime.toISOString(),
+          enabled:
+            kind === 'resourcepack' ? true : kind === 'native' ? !state.disabled.has(id) : state.enabled.has(id),
+          note: kind === 'native' ? HORIZON_NATIVE_NOTE : null,
+        })
+      }
+    }
+    mods.sort(
+      (a, b) =>
+        HORIZON_MOD_KINDS.indexOf(a.kind) - HORIZON_MOD_KINDS.indexOf(b.kind) ||
+        a.title.localeCompare(b.title),
+    )
+    return {
+      gameHome: directories.gameHome,
+      directory: directories.content,
+      stateFile: directories.stateFile,
+      mods,
+    }
+  }
+
+  /**
+   * Installs a downloaded .hnmod, .hmod, or resource pack where Horizon looks
+   * for it. The file is checked for the manifest Horizon reads before it lands
+   * in the game folder.
+   */
+  async importMod(filePath, { sourceUrl = null, id: requestedId = null } = {}) {
+    if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('Choose a Horizon mod file.')
+    const source = path.resolve(filePath)
+    const sourceStat = await fsp.stat(source).catch(() => null)
+    if (!sourceStat?.isFile()) throw new Error('That Horizon mod file no longer exists.')
+    const kind = horizonModKind(source)
+    if (!kind) throw new Error('Horizon mods must be .hnmod, .hmod, or .zip resource packs.')
+    const manifest = await readHorizonModManifest(source, kind)
+    if (!manifest) {
+      throw new Error(
+        kind === 'native'
+          ? 'That file does not hold Horizon’s horizon-native.json, so it is not a native mod.'
+          : kind === 'content'
+            ? 'That file does not hold a horizon-mod.toml, so it is not a Horizon content mod.'
+            : 'That archive does not hold a pack.mcmeta, so it is not a resource pack.',
+      )
+    }
+    const directories = this.modsDirectories()
+    const directory = directories[kind]
+    await ensureDir(directory)
+    const requested = /^[a-z0-9_]{1,64}$/.test(String(requestedId ?? '')) ? String(requestedId) : null
+    const id = manifest.id || requested || horizonModId(source)
+    const extension = path.extname(source).toLowerCase()
+    const filename = sanitizeFileName(
+      kind === 'resourcepack' && !requested ? path.basename(source) : `${id}${extension}`,
+      `mod${extension}`,
+    )
+    const destination = path.join(directory, filename)
+    if (!isPathInside(destination, directory)) throw new Error('That Horizon mod would land outside its folder.')
+    // Horizon keeps one file per mod id, so a newer download replaces the old one.
+    const previous = path.join(directory, path.basename(source))
+    if (previous !== destination && previous !== source) await fsp.rm(previous, { force: true }).catch(() => {})
+    await fsp.copyFile(source, destination)
+    const written = await fsp.stat(destination)
+    this.logger?.info('Installed a Horizon mod', {
+      filename,
+      kind,
+      id,
+      version: manifest.version,
+      sourceUrl,
+    })
+    return {
+      filename,
+      title: manifest.name || horizonModTitle(filename),
+      kind,
+      id,
+      version: manifest.version || null,
+      size: written.size,
+      note: kind === 'native' ? HORIZON_NATIVE_NOTE : null,
+    }
+  }
+
+  /** Flips Horizon's own `mod.<id>:true|false` line for a content or native mod. */
+  async toggleMod(filename, kind) {
+    const clean = requireHorizonModFileName(filename)
+    const modKind = requireHorizonModKind(kind)
+    if (modKind === 'resourcepack') throw new Error('Resource packs are always on; there is no switch for them.')
+    const directories = this.modsDirectories()
+    const filePath = path.join(directories[modKind], clean)
+    const stat = await fsp.stat(filePath).catch(() => null)
+    if (!stat?.isFile()) throw new Error('That Horizon mod is no longer installed.')
+    const manifest = await readHorizonModManifest(filePath, modKind)
+    const id = manifest?.id || horizonModId(clean)
+    const { text, state } = await this.readModState(directories)
+    // Native mods run until turned off; content mods start off until turned on.
+    const enabled = modKind === 'native' ? state.disabled.has(id) : !state.enabled.has(id)
+    await atomicWriteFile(directories.stateFile, setHorizonModState(text, id, enabled), 'utf8')
+    return { filename: clean, enabled }
+  }
+
+  async removeMod(filename, kind) {
+    const clean = requireHorizonModFileName(filename)
+    const modKind = requireHorizonModKind(kind)
+    const directories = this.modsDirectories()
+    const filePath = path.join(directories[modKind], clean)
+    const stat = await fsp.stat(filePath).catch(() => null)
+    if (!stat?.isFile()) throw new Error('That Horizon mod is no longer installed.')
+    const manifest = await readHorizonModManifest(filePath, modKind)
+    const id = manifest?.id || horizonModId(clean)
+    await fsp.rm(filePath, { force: true })
+    const { text } = await this.readModState(directories)
+    const next = removeHorizonModState(text, id)
+    if (next !== text) await atomicWriteFile(directories.stateFile, next, 'utf8')
+    return { filename: clean, kind: modKind }
+  }
+
+  async openModsFolder(kind = 'content') {
+    const modKind = requireHorizonModKind(kind)
+    const directory = this.modsDirectories()[modKind]
+    await ensureDir(directory)
+    if (typeof this.openPath === 'function') {
+      const error = await this.openPath(directory)
+      if (error) throw new Error(error)
+    }
+    return directory
   }
 
   /** The official Horizon releases that ship a build for this machine. */

@@ -2,17 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Boxes,
-  Cpu,
-  Gem,
   Check,
   CheckCircle2,
   Circle,
   Copy,
+  Cpu,
   Download,
   FolderOpen,
   Gamepad2,
+  Gem,
+  Globe2,
   HardDrive,
-  Layers,
   Pencil,
   Play,
   Plus,
@@ -26,17 +26,16 @@ import { api, getErrorMessage } from '../lib/api'
 import { formatBytes, formatEta, formatPlaytime, relativeTime, shortPath } from '../lib/format'
 import { loaderLabel } from '../lib/loaders'
 import { useLauncher } from '../state/LauncherProvider'
-import type { DownloadJob, HorizonStatus, Installation } from '../lib/types'
+import type { DownloadJob, HorizonInstallJob, HorizonStatus, Installation } from '../lib/types'
 import { PackIcon } from '../components/brand/Brand'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
-import { Button, EmptyState, IconButton, ProgressBar, cx } from '../components/ui/primitives'
+import { Badge, Button, EmptyState, IconButton, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
 import { InstallBedrockDialog } from '../components/bedrock/InstallBedrockDialog'
 import { RegisterBedrockDialog } from '../components/bedrock/RegisterBedrockDialog'
-import { HorizonPanel } from '../components/horizon/HorizonPanel'
 
-type Filter = 'all' | 'installed' | 'missing' | 'release' | 'snapshot'
+type EditionFilter = 'all' | 'java' | 'bedrock' | 'horizon'
 
 function activeInstallJob(jobs: DownloadJob[], installationId: string) {
   return (
@@ -53,6 +52,10 @@ function latestInstallJob(jobs: DownloadJob[], installationId: string) {
   return jobs.find((job) => job.type === 'install' && job.installationId === installationId) || null
 }
 
+function horizonJobActive(job: HorizonInstallJob | null) {
+  return Boolean(job && (job.status === 'queued' || job.status === 'running' || job.status === 'cancelling'))
+}
+
 export function InstallationsPage() {
   const {
     installations,
@@ -67,7 +70,6 @@ export function InstallationsPage() {
     openInstallationFolder,
     duplicateInstallation,
     deleteInstallation,
-    setDownloadsOpen,
     pushToast,
     bedrock,
     bedrockLoading,
@@ -78,20 +80,25 @@ export function InstallationsPage() {
     selectBedrockTarget,
     horizonTarget,
     bedrockLibrary,
+    bedrockDownloads,
+    cancelBedrockVersion,
     registerBedrockVersion,
     installBedrockVersion,
     removeBedrockVersion,
     openBedrockVersionFolder,
+    launchHorizon,
+    launchingHorizonTag,
+    selectHorizonTarget,
     navigate,
   } = useLauncher()
 
-  const [editionTab, setEditionTab] = useState<'java' | 'bedrock' | 'horizon'>('java')
+  const [filter, setFilter] = useState<EditionFilter>('all')
+  const [query, setQuery] = useState('')
   const [horizon, setHorizon] = useState<HorizonStatus | null>(null)
   const [horizonLoading, setHorizonLoading] = useState(false)
   const [horizonError, setHorizonError] = useState<string | null>(null)
+  const [horizonJob, setHorizonJob] = useState<HorizonInstallJob | null>(null)
   const horizonRequest = useRef(0)
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
   const [deleteTarget, setDeleteTarget] = useState<Installation | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -137,6 +144,40 @@ export function InstallationsPage() {
     void refreshHorizon(false)
   }, [refreshHorizon])
 
+  useEffect(() => {
+    if (horizon?.install) setHorizonJob(horizon.install)
+  }, [horizon?.install])
+
+  useEffect(() => {
+    const unsubscribe = api.events.subscribe((event) => {
+      if (event.type !== 'horizon-install') return
+      const next = event.payload as HorizonInstallJob
+      setHorizonJob(next)
+      if (next.status === 'completed') {
+        pushToast({
+          level: 'success',
+          title: `Horizon ${next.tag} installed`,
+          message: next.gameVersion ? `Minecraft ${next.gameVersion} is ready to play.` : 'The build is ready to play.',
+        })
+        setHorizonJob(null)
+        void refreshHorizon(true)
+      } else if (next.status === 'failed') {
+        pushToast({
+          level: 'error',
+          title: 'Horizon installation failed',
+          message: next.error || 'The installation did not finish.',
+        })
+        setHorizonJob(null)
+        void refreshHorizon(true)
+      } else if (next.status === 'cancelled') {
+        pushToast({ level: 'info', title: 'Horizon installation cancelled' })
+        setHorizonJob(null)
+        void refreshHorizon(true)
+      }
+    })
+    return unsubscribe
+  }, [pushToast, refreshHorizon])
+
   const openEditionFolder = async (editionId: string) => {
     try {
       await api.bedrock.openFolder(editionId)
@@ -157,26 +198,47 @@ export function InstallationsPage() {
     [bedrockLibrary, registeredFolders],
   )
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
+  const normalizedQuery = query.trim().toLowerCase()
+  const matches = (...values: Array<string | null | undefined>) =>
+    !normalizedQuery || values.some((value) => (value || '').toLowerCase().includes(normalizedQuery))
+
+  const javaCards = useMemo(() => {
+    if (filter !== 'all' && filter !== 'java') return []
     return installations
-      .filter((installation) => {
-        if (filter === 'installed' && !installation.installed) return false
-        if (filter === 'missing' && installation.installed) return false
-        if (filter === 'release' && installation.versionType !== 'release') return false
-        if (filter === 'snapshot' && installation.versionType !== 'snapshot') return false
-        if (!normalized) return true
-        return (
-          installation.name.toLowerCase().includes(normalized) ||
-          installation.versionId.toLowerCase().includes(normalized) ||
-          installation.gameDir.toLowerCase().includes(normalized)
-        )
-      })
+      .filter((installation) => matches(installation.name, installation.versionId, installation.gameDir, installation.loader?.type))
       .sort((a, b) => {
         if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
         return new Date(b.lastPlayedAt || b.createdAt).getTime() - new Date(a.lastPlayedAt || a.createdAt).getTime()
       })
-  }, [installations, query, filter])
+  }, [installations, filter, normalizedQuery])
+
+  const editionCards = useMemo(() => {
+    if (filter !== 'all' && filter !== 'bedrock') return []
+    return (bedrock?.editions || []).filter((edition) => matches(edition.name, edition.version, edition.packageVersion))
+  }, [bedrock, filter, normalizedQuery])
+
+  const buildCards = useMemo(() => {
+    if (filter !== 'all' && filter !== 'bedrock') return []
+    return extraBuilds.filter((entry) => matches(entry.version, entry.directory))
+  }, [extraBuilds, filter, normalizedQuery])
+
+  const horizonCards = useMemo(() => {
+    if (filter !== 'all' && filter !== 'horizon') return []
+    return (horizon?.builds || []).filter((build) => matches(build.tag, build.gameVersion))
+  }, [horizon, filter, normalizedQuery])
+
+  const counts = {
+    all:
+      installations.length +
+      (bedrock?.editions.length ?? 0) +
+      extraBuilds.length +
+      (horizon?.builds.length ?? 0),
+    java: installations.length,
+    bedrock: (bedrock?.editions.length ?? 0) + extraBuilds.length,
+    horizon: horizon?.builds.length ?? 0,
+  }
+  const visibleCount =
+    javaCards.length + editionCards.length + buildCards.length + horizonCards.length
 
   const requestDelete = (installation: Installation) => {
     setDeleteError(null)
@@ -221,19 +283,58 @@ export function InstallationsPage() {
     }
   }
 
+  const targetHorizonBuild = (build: NonNullable<HorizonStatus['builds']>[number]) => {
+    selectHorizonTarget(build)
+    pushToast({
+      level: 'info',
+      title: 'Horizon is now the Play target',
+      message: `${build.tag} will launch from the dashboard. Shift-click Play here to launch it now.`,
+    })
+  }
+
+  const prepareHorizonBuild = async (tag: string) => {
+    try {
+      setHorizonJob(await api.horizon.install(tag))
+      pushToast({
+        level: 'info',
+        title: `Horizon ${tag} is preparing`,
+        message: 'Aqua is downloading the build and writing its resources.',
+      })
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Horizon could not install', message: getErrorMessage(error) })
+    }
+  }
+
+  const cancelHorizonInstall = async () => {
+    try {
+      setHorizonJob(await api.horizon.cancelInstall())
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Could not cancel the installation', message: getErrorMessage(error) })
+    }
+  }
+
+  const refreshAll = () => {
+    void refreshBedrock(true)
+    void refreshHorizon(true)
+  }
+
+  const showHorizonJob = horizonJobActive(horizonJob) && (filter === 'all' || filter === 'horizon')
+  const nothingInstalled = counts.all === 0
+
   return (
     <div className="page">
       <PageHeader
         title="Installations"
-        subtitle={
-          editionTab === 'java'
-            ? 'Each profile keeps its own version and game folder. Play sets the dashboard target; Shift-click Play to launch it now.'
-            : editionTab === 'bedrock'
-              ? 'Bedrock editions installed for this Windows account, plus builds downloaded here. Play sets the dashboard target; Shift-click Play to launch it now.'
-              : 'Horizon Rust builds installed, prepared, and launched by Aqua. Play sets the dashboard target; Shift-click Play to launch it now.'
-        }
+        subtitle="Java profiles, Bedrock builds and Horizon builds in one list. Play sets the dashboard target; Shift-click Play to launch it now."
         actions={
-          editionTab === 'java' ? (
+          <>
+            <Button
+              icon={<RefreshCw className={bedrockLoading || horizonLoading ? 'spin' : undefined} />}
+              onClick={refreshAll}
+              disabled={bedrockLoading || horizonLoading}
+            >
+              Refresh
+            </Button>
             <Button
               variant="primary"
               icon={<Plus />}
@@ -241,62 +342,16 @@ export function InstallationsPage() {
             >
               New installation
             </Button>
-          ) : editionTab === 'bedrock' ? (
-            <Button icon={<Download />} onClick={() => navigate('versions')}>
-              Browse versions
-            </Button>
-          ) : (
-            <Button
-              icon={<RefreshCw className={horizonLoading ? 'spin' : undefined} />}
-              onClick={() => void refreshHorizon(true)}
-              loading={horizonLoading}
-            >
-              Refresh
-            </Button>
-          )
+          </>
         }
       />
 
-      <div className="segmented edition-switch" role="tablist" aria-label="Edition">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={editionTab === 'java'}
-          className={editionTab === 'java' ? 'is-active' : undefined}
-          onClick={() => setEditionTab('java')}
-        >
-          <Boxes /> Java Edition
-          <span className="edition-switch__count">{installations.length}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={editionTab === 'bedrock'}
-          className={editionTab === 'bedrock' ? 'is-active' : undefined}
-          onClick={() => setEditionTab('bedrock')}
-        >
-          <Gem /> Bedrock Edition
-          <span className="edition-switch__count">{(bedrock?.editions.length ?? 0) + extraBuilds.length}</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={editionTab === 'horizon'}
-          className={editionTab === 'horizon' ? 'is-active' : undefined}
-          onClick={() => setEditionTab('horizon')}
-        >
-          <Cpu /> Horizon
-          <span className="edition-switch__count">{horizon?.builds.length ?? 0}</span>
-        </button>
-      </div>
-
-      {editionTab === 'java' ? (
       <div className="page-toolbar">
         <div className="search-input">
           <Search />
           <input
             className="input"
-            placeholder="Search installations, versions or folders…"
+            placeholder="Search versions, editions or folders…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label="Search installations"
@@ -307,15 +362,14 @@ export function InstallationsPage() {
             </button>
           ) : null}
         </div>
-        <div className="filter-chips" role="group" aria-label="Filter installations">
+        <div className="filter-chips" role="group" aria-label="Filter by edition">
           {(
             [
               ['all', 'All'],
-              ['installed', 'Installed'],
-              ['missing', 'Not installed'],
-              ['release', 'Releases'],
-              ['snapshot', 'Snapshots'],
-            ] as Array<[Filter, string]>
+              ['java', 'Java'],
+              ['bedrock', 'Bedrock'],
+              ['horizon', 'Horizon'],
+            ] as Array<[EditionFilter, string]>
           ).map(([value, label]) => (
             <button
               key={value}
@@ -325,240 +379,95 @@ export function InstallationsPage() {
               aria-pressed={filter === value}
             >
               {label}
+              <span className="chip__count">{counts[value]}</span>
             </button>
           ))}
         </div>
         <span className="page-toolbar__count">
-          {filtered.length} of {installations.length}
+          {visibleCount} of {counts.all}
         </span>
       </div>
-      ) : editionTab === 'bedrock' ? (
-        <div className="page-toolbar">
-          <span className="page-toolbar__count">
-            {bedrock?.editions.length ?? 0} installed · {extraBuilds.length} downloaded
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<RefreshCw className={bedrockLoading ? 'spin' : undefined} />}
-            onClick={() => void refreshBedrock(true)}
-            disabled={bedrockLoading}
-          >
-            Refresh
-          </Button>
-        </div>
-      ) : (
-        <div className="page-toolbar">
-          <span className="page-toolbar__count">
-            {horizon?.builds.length ?? 0} build{horizon?.builds.length === 1 ? '' : 's'} installed ·{' '}
-            {horizon?.worlds ?? 0} world{horizon?.worlds === 1 ? '' : 's'}
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<RefreshCw className={horizonLoading ? 'spin' : undefined} />}
-            onClick={() => void refreshHorizon(true)}
-            disabled={horizonLoading}
-          >
-            Refresh
-          </Button>
-        </div>
-      )}
 
-      {editionTab === 'horizon' ? (
-        <HorizonPanel
-          status={horizon}
-          loading={horizonLoading}
-          error={horizonError}
-          onRefresh={() => void refreshHorizon(true)}
-        />
-      ) : null}
-
-      {editionTab === 'bedrock' ? (
-        <>
-      {bedrock?.editions.length ? (
-        <section className="bedrock-panel">
-          <div className="bedrock-panel__head">
-            <div>
-              <h2>Bedrock Edition</h2>
-              <p>
-                Installed from the Microsoft Store. Bedrock signs in with your Xbox profile and keeps its own worlds,
-                separate from Java.
-              </p>
-            </div>
-            <button type="button" className="link-button" onClick={() => void refreshBedrock(true)} disabled={bedrockLoading}>
-              <RefreshCw /> Refresh
-            </button>
-          </div>
-          <div className="bedrock-grid">
-            {bedrock.editions.map((edition) => (
-              <article className="bedrock-card" key={edition.id}>
-                <div className="bedrock-card__identity">
-                  <span className="bedrock-card__icon" aria-hidden="true">
-                    <Boxes />
-                  </span>
-                  <div className="bedrock-card__titles">
-                    <h3>
-                      {edition.name}
-                      {bedrockTarget?.id === edition.id ? (
-                        <span className="bedrock-card__target">
-                          <CheckCircle2 /> Play target
-                        </span>
-                      ) : null}
-                    </h3>
-                    <p>
-                      {edition.version ? `Bedrock ${edition.version}` : 'Version unknown'}
-                      <span className="bedrock-card__dot">·</span>
-                      package {edition.packageVersion}
-                    </p>
-                  </div>
-                </div>
-                <dl className="bedrock-card__facts">
-                  <div>
-                    <dt>Data folder</dt>
-                    <dd title={edition.dataRoot}>{shortPath(edition.dataRoot)}</dd>
-                  </div>
-                  <div>
-                    <dt>Worlds folder</dt>
-                    <dd title={edition.worldsDirectory}>{shortPath(edition.worldsDirectory)}</dd>
-                  </div>
-                </dl>
-                <div className="bedrock-card__actions">
-                  <Button
-                    variant="primary"
-                    icon={<Play />}
-                    loading={launchingEditionId === edition.id}
-                    title="Set as the Play target · Shift-click to launch now"
-                    onClick={(event) => {
-                      if (event.shiftKey) void launchEdition(edition.id)
-                      else targetEdition(edition.id)
-                    }}
-                  >
-                    Play
-                  </Button>
-                  <Button icon={<FolderOpen />} onClick={() => void openEditionFolder(edition.id)}>
-                    Open data folder
-                  </Button>
-                  <Button icon={<Layers />} onClick={() => navigate('worlds')}>
-                    Worlds
-                  </Button>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : bedrock?.supported && !bedrockLoading ? (
+      {bedrock?.supported && !bedrock?.editions.length && !bedrockLoading ? (
         <div className="callout bedrock-callout">
           <Store />
           <div>
             <strong>Minecraft for Windows was not found</strong>
             <span>
-              Install Bedrock Edition from the Microsoft Store to play it, and to use Bedrock servers and worlds here.{' '}
+              Install Bedrock Edition from the Microsoft Store to play it, or add a downloaded build with{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => openInstallDialog({ mode: 'create', edition: 'bedrock' })}
+              >
+                New installation
+              </button>
+              .{' '}
               <button type="button" className="link-button" onClick={() => void api.openExternal(bedrock.storeUrl)}>
                 Open the Store page
               </button>
             </span>
-            {bedrockLibrary.length ? (
-              <span className="text-dim">
-                Registering a downloaded build below hands the Minecraft package over to that copy, and the Store version
-                stays missing until you install it again.
-              </span>
-            ) : null}
           </div>
         </div>
       ) : null}
 
-      {bedrockLibrary.length ? (
-        <section className="panel bedrock-downloads">
-          <div className="panel-head">
-            <div>
-              <h2 className="panel-head__title">Bedrock builds downloaded here</h2>
-              <p className="panel-head__subtitle">
-                Kept in the launcher's own folder. Registering an older build makes Windows run it in place; newer Store
-                packages are handed to Windows, which installs them over the current copy.
-              </p>
-            </div>
-            <button type="button" className="link-button" onClick={() => navigate('versions')}>
-              More versions
-            </button>
+      {horizon && !horizon.supported ? (
+        <div className="callout callout--warning">
+          <AlertTriangle />
+          <div>
+            <strong>Horizon is not available for this platform</strong>
+            <span>{horizon.supportedReason}</span>
           </div>
-          {bedrockLibrary.map((entry) => {
-            const linked = registeredFolders.has(folderKey(entry.directory))
-            const installed = Boolean(bedrock?.editions[0]?.version) && bedrock?.editions[0]?.version === entry.version
-            return (
-              <div className="bedrock-download-row" key={entry.version}>
-                <div className="grow">
-                  <span className="bedrock-download-row__version">
-                    Bedrock {entry.version}
-                    {linked ? <span className="bedrock-download-row__flag">Registered</span> : null}
-                    {!linked && installed ? <span className="bedrock-download-row__flag">Installed</span> : null}
-                  </span>
-                  <span className="bedrock-download-row__meta">
-                    {formatBytes(entry.sizeBytes)}
-                    {linked
-                      ? ' · this folder is the installed Minecraft'
-                      : entry.layout === 'appx'
-                        ? ' · ready to register'
-                        : installed
-                          ? ' · installed through Windows'
-                          : ' · Store package, ready to install'}
-                  </span>
-                </div>
-                {entry.layout === 'appx' ? (
-                  linked ? null : (
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      icon={<CheckCircle2 />}
-                      onClick={() => setRegisterTarget(entry.version)}
-                    >
-                      Register build
-                    </Button>
-                  )
-                ) : installed ? null : (
-                  <Button size="sm" variant="primary" icon={<HardDrive />} onClick={() => setInstallTarget(entry.version)}>
-                    Install build
-                  </Button>
-                )}
-                <Button size="sm" icon={<FolderOpen />} onClick={() => void openBedrockVersionFolder(entry.version)}>
-                  Open folder
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<Trash2 />}
-                  disabled={linked}
-                  title={linked ? 'Windows is running this build. Uninstall it in Windows Settings first.' : undefined}
-                  onClick={() => void removeBedrockVersion(entry.version)}
-                >
-                  Remove
-                </Button>
-              </div>
-            )
-          })}
+        </div>
+      ) : null}
+
+      {showHorizonJob && horizonJob ? (
+        <section className="panel installation-job-panel">
+          <div className="installation-job-panel__head">
+            <div>
+              <strong>Horizon {horizonJob.tag} is installing</strong>
+              <span className="text-dim">
+                {horizonJob.stage}
+                {horizonJob.progress != null ? ` · ${Math.round(horizonJob.progress)}%` : ''}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<X />}
+              loading={horizonJob.status === 'cancelling'}
+              onClick={() => void cancelHorizonInstall()}
+            >
+              Cancel
+            </Button>
+          </div>
+          <div className="installation-card__download-meta">
+            <span>{horizonJob.message || horizonJob.currentFile || ''}</span>
+            <span>
+              {horizonJob.bytesTotal > 0
+                ? `${formatBytes(horizonJob.bytesDone)} / ${formatBytes(horizonJob.bytesTotal)}`
+                : ''}
+              {horizonJob.speedBps > 0 ? ` · ${formatBytes(horizonJob.speedBps)}/s` : ''}
+              {horizonJob.etaSeconds != null && horizonJob.etaSeconds > 0
+                ? ` · ${formatEta(horizonJob.etaSeconds)} left`
+                : ''}
+            </span>
+          </div>
         </section>
       ) : null}
 
-      <RegisterBedrockDialog
-        version={registerTarget}
-        onCancel={() => setRegisterTarget(null)}
-        onConfirm={(options) => {
-          const version = registerTarget
-          setRegisterTarget(null)
-          if (version) void registerBedrockVersion(version, options)
-        }}
-      />
-
-      <InstallBedrockDialog
-        version={installTarget}
-        installedVersion={bedrock?.editions[0]?.version || null}
-        onCancel={() => setInstallTarget(null)}
-        onConfirm={() => {
-          const version = installTarget
-          setInstallTarget(null)
-          if (version) void installBedrockVersion(version)
-        }}
-      />
+      {horizonError ? (
+        <div className="callout callout--danger" role="alert">
+          <AlertTriangle />
+          <div className="grow">
+            {horizonError}
+            <span className="text-dim"> Horizon builds are listed when its status can be read.</span>
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => void refreshHorizon(true)} loading={horizonLoading}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
 
       {bedrockError ? (
         <div className="callout callout--danger" role="alert">
@@ -566,36 +475,28 @@ export function InstallationsPage() {
           <span>{bedrockError}</span>
         </div>
       ) : null}
-        </>
-      ) : null}
 
-      {editionTab === 'java' ? (
-        <>
-      {installations.length === 0 ? (
+      {nothingInstalled ? (
         <div className="panel">
           <EmptyState
-            icon={<Layers />}
-            title="No installations yet"
-            description="Create a profile to pick a Minecraft version, choose a game folder, and download only the files you need."
+            icon={<Boxes />}
+            title="Nothing installed yet"
+            description="Create a Java installation, add a Bedrock build, or install Horizon. Each card keeps its own version and folder."
           >
-            <Button
-              variant="primary"
-              icon={<Plus />}
-              onClick={() => openInstallDialog({ mode: 'create', versionId: versions?.latest.release })}
-            >
-              Create installation
+            <Button variant="primary" icon={<Plus />} onClick={() => openInstallDialog({ mode: 'create' })}>
+              New installation
             </Button>
-            <Button icon={<Download />} onClick={() => setDownloadsOpen(true)}>
-              View downloads
+            <Button icon={<Download />} onClick={() => navigate('tasks')}>
+              View tasks
             </Button>
           </EmptyState>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : visibleCount === 0 ? (
         <div className="panel">
           <EmptyState
             icon={<Search />}
-            title="No matching installations"
-            description="Try a different search term or clear the active filter."
+            title="Nothing matches this filter"
+            description="Try a different search term, or pick another edition."
           >
             <Button
               onClick={() => {
@@ -609,7 +510,7 @@ export function InstallationsPage() {
         </div>
       ) : (
         <div className="installation-grid">
-          {filtered.map((installation) => {
+          {javaCards.map((installation) => {
             const job = activeInstallJob(jobs, installation.id)
             const lastJob = latestInstallJob(jobs, installation.id)
             const isPlaying = game.status === 'running' && game.installationId === installation.id
@@ -656,6 +557,7 @@ export function InstallationsPage() {
                             ? ` · ${loaderLabel(installation.loader.type)}`
                             : ''}
                         </span>
+                        <Badge tone="default">Java</Badge>
                       </div>
                     </div>
                   </div>
@@ -728,15 +630,14 @@ export function InstallationsPage() {
                         {job.progress != null ? ` · ${job.progress}%` : ''}
                       </span>
                       <div className="row gap-2">
-                        <button type="button" className="link-button" onClick={() => setDownloadsOpen(true)}>
-                          Details
+                        <button type="button" className="link-button" onClick={() => navigate('tasks')}>
+                          Open Tasks
                         </button>
                         <IconButton label="Cancel installation" size="sm" onClick={() => void cancelJob(job)}>
                           <X />
                         </IconButton>
                       </div>
                     </div>
-                    <ProgressBar value={job.progress} label="Installation progress" thin />
                     <div className="installation-card__download-meta">
                       <span>
                         {job.bytesTotal > 0
@@ -762,18 +663,11 @@ export function InstallationsPage() {
 
                 <div className="installation-card__actions">
                   {isPlaying ? (
-                    <Button
-                      size="sm"
-                      variant="subtle"
-                      icon={<Gamepad2 />}
-                      onClick={() =>
-                        play(installation.id)
-                      }
-                    >
+                    <Button size="sm" variant="subtle" icon={<Gamepad2 />} onClick={() => play(installation.id)}>
                       In game
                     </Button>
                   ) : job ? (
-                    <Button size="sm" variant="subtle" icon={<Download />} onClick={() => setDownloadsOpen(true)}>
+                    <Button size="sm" variant="subtle" icon={<Download />} onClick={() => navigate('tasks')}>
                       {job.progress != null ? `Installing ${job.progress}%` : 'Installing'}
                     </Button>
                   ) : isPreparing ? (
@@ -822,10 +716,317 @@ export function InstallationsPage() {
               </article>
             )
           })}
+
+          {editionCards.map((edition) => (
+            <article
+              key={edition.id}
+              className={cx('installation-card', bedrockTarget?.id === edition.id && 'is-selected')}
+            >
+              <div className="installation-card__top">
+                <div className="installation-card__identity">
+                  <div className="installation-card__cube" data-edition="bedrock">
+                    <Gem />
+                  </div>
+                  <div className="installation-card__titles">
+                    <div className="installation-card__name-row">
+                      <h2 className="installation-card__name">{edition.name}</h2>
+                      {bedrockTarget?.id === edition.id ? (
+                        <span className="installation-card__target">
+                          <CheckCircle2 /> Play target
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="installation-card__version-row">
+                      <span className="installation-card__version">
+                        {edition.version ? `Bedrock ${edition.version}` : 'Version unknown'} · package{' '}
+                        {edition.packageVersion}
+                      </span>
+                      <Badge tone="default">Bedrock</Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="installation-card__statusline">
+                <span className="installation-card__played">Installed from the Microsoft Store</span>
+              </div>
+
+              <dl className="installation-card__facts">
+                <div>
+                  <dt>Data folder</dt>
+                  <dd title={edition.dataRoot}>{shortPath(edition.dataRoot)}</dd>
+                </div>
+                <div>
+                  <dt>Worlds folder</dt>
+                  <dd title={edition.worldsDirectory}>{shortPath(edition.worldsDirectory)}</dd>
+                </div>
+              </dl>
+
+              <div className="installation-card__actions">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={<Play />}
+                  loading={launchingEditionId === edition.id}
+                  title="Set as the Play target · Shift-click to launch now"
+                  onClick={(event) => {
+                    if (event.shiftKey) void launchEdition(edition.id)
+                    else targetEdition(edition.id)
+                  }}
+                >
+                  Play
+                </Button>
+                <Button size="sm" icon={<FolderOpen />} onClick={() => void openEditionFolder(edition.id)}>
+                  Data folder
+                </Button>
+                <Button size="sm" variant="ghost" icon={<Globe2 />} onClick={() => navigate('worlds')}>
+                  Worlds
+                </Button>
+              </div>
+            </article>
+          ))}
+
+          {buildCards.map((entry) => {
+            const linked = registeredFolders.has(folderKey(entry.directory))
+            const installed =
+              Boolean(bedrock?.editions[0]?.version) && bedrock?.editions[0]?.version === entry.version
+            const progress = bedrockDownloads[entry.version] ?? null
+            const busy = Boolean(
+              progress && progress.phase !== 'done' && progress.phase !== 'error' && progress.phase !== 'cancelled',
+            )
+            const percent =
+              progress && progress.totalBytes
+                ? Math.round((progress.receivedBytes / progress.totalBytes) * 100)
+                : progress?.phase === 'downloading'
+                  ? null
+                  : 0
+            return (
+              <article className="installation-card" key={`bedrock-${entry.version}`}>
+                <div className="installation-card__top">
+                  <div className="installation-card__identity">
+                    <div className="installation-card__cube" data-edition="bedrock">
+                      <Gem />
+                    </div>
+                    <div className="installation-card__titles">
+                      <div className="installation-card__name-row">
+                        <h2 className="installation-card__name">Bedrock {entry.version}</h2>
+                        {linked ? <Badge tone="success">Registered</Badge> : null}
+                        {!linked && installed ? <Badge tone="success">Installed</Badge> : null}
+                      </div>
+                      <div className="installation-card__version-row">
+                        <span className="installation-card__version">
+                          {entry.layout === 'appx' ? 'APPX build · opens in place' : 'MSIXVC build · installs through Windows'}
+                        </span>
+                        <Badge tone="default">Bedrock</Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="installation-card__statusline">
+                  <span className="installation-card__played">
+                    {linked
+                      ? 'This folder is the installed Minecraft'
+                      : installed
+                        ? 'Installed through Windows'
+                        : 'Downloaded, not installed'}
+                  </span>
+                </div>
+
+                <dl className="installation-card__facts">
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{formatBytes(entry.sizeBytes)}</dd>
+                  </div>
+                  <div>
+                    <dt>Folder</dt>
+                    <dd title={entry.directory}>{shortPath(entry.directory, 44)}</dd>
+                  </div>
+                </dl>
+
+                {busy && progress ? (
+                  <div className="installation-card__download">
+                    <div className="installation-card__download-head">
+                      <span>
+                        {progress.phase === 'resolving'
+                          ? 'Finding the package…'
+                          : progress.phase === 'extracting'
+                            ? 'Unpacking the build…'
+                            : progress.phase === 'installing'
+                              ? 'Windows is installing the build…'
+                              : `Downloading${percent != null ? ` · ${percent}%` : ''}`}
+                      </span>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => void cancelBedrockVersion(entry.version)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="installation-card__actions">
+                  {entry.layout === 'appx' ? (
+                    linked ? null : (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        icon={<CheckCircle2 />}
+                        disabled={busy}
+                        onClick={() => setRegisterTarget(entry.version)}
+                      >
+                        Register
+                      </Button>
+                    )
+                  ) : installed ? null : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      icon={<HardDrive />}
+                      disabled={busy}
+                      onClick={() => setInstallTarget(entry.version)}
+                    >
+                      Install
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<FolderOpen />}
+                    onClick={() => void openBedrockVersionFolder(entry.version)}
+                  >
+                    Folder
+                  </Button>
+                  <IconButton
+                    label={`Remove Bedrock ${entry.version}`}
+                    size="sm"
+                    disabled={linked}
+                    title={linked ? 'Windows is running this build. Uninstall it in Windows Settings first.' : undefined}
+                    onClick={() => void removeBedrockVersion(entry.version)}
+                  >
+                    <Trash2 />
+                  </IconButton>
+                </div>
+              </article>
+            )
+          })}
+
+          {horizonCards.map((build) => (
+            <article
+              key={`horizon-${build.tag}`}
+              className={cx('installation-card', horizonTarget?.tag === build.tag && 'is-selected')}
+            >
+              <div className="installation-card__top">
+                <div className="installation-card__identity">
+                  <div className="installation-card__cube" data-edition="horizon">
+                    <Cpu />
+                  </div>
+                  <div className="installation-card__titles">
+                    <div className="installation-card__name-row">
+                      <h2 className="installation-card__name">Horizon {build.tag}</h2>
+                      {horizonTarget?.tag === build.tag ? (
+                        <span className="installation-card__target">
+                          <CheckCircle2 /> Play target
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="installation-card__version-row">
+                      <span className="installation-card__version">
+                        Minecraft {build.gameVersion}
+                        {build.javaMajor ? ` · Java ${build.javaMajor}` : ''}
+                        {build.native ? ' · built here' : ''}
+                      </span>
+                      <Badge tone="default">Horizon</Badge>
+                      <Badge tone={build.prepared ? 'success' : 'warning'}>
+                        {build.prepared ? 'Ready' : 'Needs preparation'}
+                      </Badge>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="installation-card__statusline">
+                <span className="installation-card__played">
+                  {build.installedAt ? `Installed ${relativeTime(build.installedAt)}` : 'Installed by Aqua'}
+                </span>
+              </div>
+
+              <dl className="installation-card__facts">
+                <div>
+                  <dt>Build folder</dt>
+                  <dd title={build.directory}>{shortPath(build.directory, 44)}</dd>
+                </div>
+              </dl>
+
+              {build.warning ? (
+                <div className="installation-card__download is-error">
+                  <span className="installation-card__download-error">{build.warning}</span>
+                </div>
+              ) : null}
+
+              <div className="installation-card__actions">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={<Play />}
+                  loading={launchingHorizonTag === build.tag}
+                  disabled={!build.prepared}
+                  title={
+                    build.prepared
+                      ? 'Set as the Play target · Shift-click to launch now'
+                      : 'Install this build again to finish preparation.'
+                  }
+                  onClick={(event) => {
+                    if (event.shiftKey) void launchHorizon(build, { keepTarget: true })
+                    else targetHorizonBuild(build)
+                  }}
+                >
+                  Play
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<RefreshCw />}
+                  title="Download and prepare this build again"
+                  onClick={() => void prepareHorizonBuild(build.tag)}
+                >
+                  {build.prepared ? 'Repair' : 'Prepare'}
+                </Button>
+                <IconButton
+                  label={`Open Horizon ${build.tag} folder`}
+                  size="sm"
+                  onClick={() => void api.horizon.openFolder('build', build.tag)}
+                >
+                  <FolderOpen />
+                </IconButton>
+              </div>
+            </article>
+          ))}
         </div>
       )}
-        </>
-      ) : null}
+
+      <RegisterBedrockDialog
+        version={registerTarget}
+        onCancel={() => setRegisterTarget(null)}
+        onConfirm={(options) => {
+          const version = registerTarget
+          setRegisterTarget(null)
+          if (version) void registerBedrockVersion(version, options)
+        }}
+      />
+
+      <InstallBedrockDialog
+        version={installTarget}
+        installedVersion={bedrock?.editions[0]?.version || null}
+        onCancel={() => setInstallTarget(null)}
+        onConfirm={() => {
+          const version = installTarget
+          setInstallTarget(null)
+          if (version) void installBedrockVersion(version)
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

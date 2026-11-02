@@ -411,9 +411,9 @@ export interface Toast {
 export type PageName =
   | 'home'
   | 'installations'
+  | 'tasks'
   | 'worlds'
   | 'servers'
-  | 'versions'
   | 'mods'
   | 'account'
   | 'logs'
@@ -430,10 +430,15 @@ export interface RouteState {
   }
 }
 
+/** The three editions that can be installed from the one installation screen. */
+export type InstallEdition = 'java' | 'bedrock' | 'horizon'
+
 export interface InstallDialogState {
   mode: 'create' | 'edit'
   installation?: Installation
   versionId?: string
+  /** Which edition the dialog opens on; Java when omitted. */
+  edition?: InstallEdition
 }
 
 export interface InstallationInput {
@@ -741,6 +746,8 @@ export interface BedrockRegistrationResult {
   elevated: boolean
   /** Framework requirements that were dropped from the build's manifest. */
   ignoredDependencies: string[]
+  /** The Minecraft build Windows had registered before this one took over. */
+  replacedVersion: string | null
   registeredVersion: string | null
   packageVersion: string | null
 }
@@ -869,6 +876,12 @@ export interface HorizonBuild {
   assetName: string | null
   javaMajor: number | null
   warning: string | null
+  /** Compiled by Aqua with native mods, rather than a published release. */
+  native?: boolean
+  baseTag?: string | null
+  revision?: string | null
+  profile?: string | null
+  nativeMods?: number
 }
 
 export interface HorizonStatus {
@@ -905,6 +918,122 @@ export interface HorizonLaunchResult {
 }
 
 export type HorizonFolderKind = 'game' | 'worlds' | 'builds' | 'build' | 'downloads'
+
+/** Horizon's three mod files: .hmod content, .hnmod native, and .zip packs. */
+export type HorizonModKind = 'content' | 'native' | 'resourcepack'
+
+export interface HorizonMod {
+  filename: string
+  title: string
+  kind: HorizonModKind
+  id: string
+  version: string | null
+  size: number
+  modified: string
+  enabled: boolean
+  note: string | null
+}
+
+export interface HorizonModsResult {
+  gameHome: string
+  directory: string
+  stateFile: string
+  mods: HorizonMod[]
+}
+
+export interface HorizonModImportResult {
+  filename: string
+  title: string
+  kind: HorizonModKind
+  id: string
+  version: string | null
+  size: number
+  note: string | null
+}
+
+/** One published release file in Horizon's registry. */
+export interface HorizonRegistryVersion {
+  version: string | null
+  game: string | null
+  published: string | null
+  changelog: string | null
+  api: string | null
+  fileName: string
+  url: string
+  size: number
+  sha256: string
+  signature: string | null
+}
+
+export interface HorizonRegistryProject {
+  id: string
+  name: string
+  summary: string
+  description: string
+  authors: string[]
+  license: string | null
+  source: string | null
+  icon: string | null
+  downloads: number
+  kind: HorizonModKind
+  official: boolean
+  versions: HorizonRegistryVersion[]
+}
+
+export interface HorizonRegistryResult {
+  schema: number | null
+  generated: string | null
+  projects: HorizonRegistryProject[]
+  revoked: unknown[]
+  fetchedAt: string | null
+  fromCache: boolean
+  stale: boolean
+  error: string | null
+}
+
+export interface HorizonProjectInstallResult extends HorizonModImportResult {
+  projectId: string
+  projectName: string
+  projectVersion: string | null
+  sha256: string
+}
+
+export type HorizonNativeBuildStatus = 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled'
+
+export interface HorizonNativeJob {
+  id: string
+  type: 'horizon-native'
+  status: HorizonNativeBuildStatus
+  stage: string
+  message: string | null
+  profile: string | null
+  revision: string | null
+  mixins: string | null
+  tag: string | null
+  mods: number
+  startedAt: string
+  finishedAt: string | null
+  error: string | null
+  progress?: number | null
+  logTail?: string[]
+}
+
+export interface HorizonNativeStatus {
+  rust: {
+    available: boolean
+    version: string | null
+    source: 'aqua' | 'system' | null
+    canDownload: boolean
+    error: string | null
+  }
+  enabledNativeMods: number
+  baseTag: string | null
+  baseBuilds: number
+  gameVersion: string | null
+  canBuild: boolean
+  reason: string | null
+  job: HorizonNativeJob | null
+}
 
 export interface MinecraftSettingsFile {
   name: string

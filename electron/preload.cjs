@@ -122,6 +122,16 @@ const api = {
     cancelInstall: () => invoke('horizon:cancelInstall'),
     launch: (version = null) => invoke('horizon:launch', { version }),
     openFolder: (kind, version = null) => invoke('horizon:openFolder', { kind, version }),
+    mods: () => invoke('horizon:mods'),
+    importMod: (filePath) => invoke('horizon:importMod', { filePath }),
+    toggleMod: (filename, kind) => invoke('horizon:toggleMod', { filename, kind }),
+    removeMod: (filename, kind) => invoke('horizon:removeMod', { filename, kind }),
+    modsFolder: (kind = 'content') => invoke('horizon:modsFolder', { kind }),
+    registry: (options = {}) => invoke('horizon:registry', options),
+    installProject: (projectId, version = null) => invoke('horizon:installProject', { projectId, version }),
+    nativeStatus: () => invoke('horizon:nativeStatus'),
+    buildNative: (profile = null) => invoke('horizon:buildNative', { profile }),
+    cancelNativeBuild: () => invoke('horizon:cancelNativeBuild'),
   },
   bedrock: {
     status: (options = {}) => invoke('bedrock:status', options),
@@ -160,6 +170,7 @@ const api = {
     chooseDirectory: (options = {}) => invoke('dialog:chooseDirectory', options),
     chooseJava: () => invoke('dialog:chooseJava'),
     chooseAddon: () => invoke('dialog:chooseAddon'),
+    chooseHorizonMod: () => invoke('dialog:chooseHorizonMod'),
   },
   events: {
     subscribe: (handler) => {

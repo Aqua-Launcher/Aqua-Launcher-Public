@@ -22,6 +22,8 @@ import type {
   DownloadJob,
   GameState,
   HorizonBuild,
+  HorizonInstallJob,
+  HorizonNativeJob,
   InstallDialogState,
   Installation,
   InstallationInput,
@@ -73,8 +75,10 @@ interface LauncherContextValue {
   toasts: Toast[]
   pushToast: (toast: Omit<Toast, 'id'>) => void
   dismissToast: (id: string) => void
-  downloadsOpen: boolean
-  setDownloadsOpen: (open: boolean) => void
+  /** The Horizon client install that has run this session, while it is known. */
+  horizonInstallJob: HorizonInstallJob | null
+  /** The Rust build that compiles Horizon's native mods into the game. */
+  horizonNativeJob: HorizonNativeJob | null
   installDialog: InstallDialogState | null
   openInstallDialog: (state?: Partial<InstallDialogState>) => void
   closeInstallDialog: () => void
@@ -181,7 +185,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [launchingHorizonTag, setLaunchingHorizonTag] = useState<string | null>(null)
   const [route, setRoute] = useState<RouteState>({ page: 'home' })
   const [toasts, setToasts] = useState<Toast[]>([])
-  const [downloadsOpen, setDownloadsOpen] = useState(false)
+  const [horizonInstallJob, setHorizonInstallJob] = useState<HorizonInstallJob | null>(null)
+  const [horizonNativeJob, setHorizonNativeJob] = useState<HorizonNativeJob | null>(null)
   const [installDialog, setInstallDialog] = useState<InstallDialogState | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
@@ -232,7 +237,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement
     root.dataset.theme = 'midnight'
     root.dataset.accent = 'aqua'
-    root.dataset.font = 'quicksand'
+    root.dataset.font = 'minecraft'
     root.dataset.rounding = 'rounded'
     root.dataset.depth = 'false'
     root.dataset.reduceMotion = String(settings.reduceMotion)
@@ -288,6 +293,26 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  /**
+   * Horizon and its Rust builds run in the main process. Their current job is read
+   * once at boot so work started before this page was opened still appears here;
+   * the `horizon-install` and `horizon-native` events keep it current afterwards.
+   */
+  const refreshHorizonTasks = useCallback(async () => {
+    try {
+      const status = await api.horizon.status()
+      if (status?.install) setHorizonInstallJob(status.install)
+    } catch {
+      // Horizon is optional, and the launcher works without it.
+    }
+    try {
+      const native = await api.horizon.nativeStatus()
+      setHorizonNativeJob(native.job ?? null)
+    } catch {
+      // A missing Rust toolchain is reported on the Horizon page instead.
+    }
+  }, [])
+
   const loadBootstrap = useCallback(async () => {
     setLoading(true)
     setBootError(null)
@@ -302,12 +327,13 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       void refreshJava(false)
       void refreshBedrock(false)
       void refreshBedrockLibrary()
+      void refreshHorizonTasks()
       api.windowControls.getState().then((state) => setWindowMaximized(state.maximized)).catch(() => {})
     } catch (error) {
       setBootError(getErrorMessage(error))
       setLoading(false)
     }
-  }, [applyTheme, refreshBedrock, refreshJava, refreshVersions])
+  }, [applyTheme, refreshBedrock, refreshHorizonTasks, refreshJava, refreshVersions])
 
   useEffect(() => {
     if (initialised.current) return
@@ -377,9 +403,26 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           setBedrockDownloads((current) => ({ ...current, [payload.version]: payload }))
           break
         }
+        case 'horizon-install': {
+          const payload = event.payload as EventPayloadMap['horizon-install']
+          setHorizonInstallJob(payload)
+          break
+        }
+        case 'horizon-native': {
+          const payload = event.payload as EventPayloadMap['horizon-native']
+          setHorizonNativeJob(payload)
+          break
+        }
         case 'storage:progress': {
           const payload = event.payload as EventPayloadMap['storage:progress']
-          setStorageProgress(payload.phase === 'scan' && payload.done ? null : payload)
+          // A scan reports `done: true`; a cleanup counts up to its candidate total.
+          const finished =
+            (payload.phase === 'scan' && Boolean(payload.done)) ||
+            (payload.phase === 'clean' &&
+              typeof payload.done === 'number' &&
+              typeof payload.total === 'number' &&
+              payload.done >= payload.total)
+          setStorageProgress(finished ? null : payload)
           break
         }
         default:
@@ -422,7 +465,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   const navigate = useCallback((page: PageName, params?: RouteState['params']) => {
     setRoute({ page, params })
-    setDownloadsOpen(false)
   }, [])
 
   const openInstallDialog = useCallback((state?: Partial<InstallDialogState>) => {
@@ -430,6 +472,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       mode: state?.mode || 'create',
       installation: state?.installation,
       versionId: state?.versionId,
+      edition: state?.edition,
     })
   }, [])
 
@@ -617,12 +660,13 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         const ignored = result.ignoredDependencies?.length
           ? ` Dropped the missing ${result.ignoredDependencies.join(', ')} requirement, so that part may not work in game.`
           : ''
+        const replaced = result.replacedVersion ? ` Windows removed Minecraft ${result.replacedVersion} to make room.` : ''
         pushToast({
           level: 'success',
           title: `Bedrock ${version} registered`,
           message: result.registeredVersion
-            ? `Windows now reports ${result.registeredVersion}${result.elevated ? ', installed with administrator approval' : ''}.${ignored}`
-            : `Windows registered the downloaded build.${ignored}`,
+            ? `Windows now reports ${result.registeredVersion}${result.elevated ? ', installed with administrator approval' : ''}.${replaced}${ignored}`
+            : `Windows registered the downloaded build.${replaced}${ignored}`,
         })
         void refreshBedrock(true)
         void refreshBedrockLibrary()
@@ -773,7 +817,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           title: 'Installation started',
           message: 'Game files are downloading in the background.',
         })
-        setDownloadsOpen(true)
+        navigate('tasks')
         return job
       } catch (error) {
         setLaunchError({
@@ -784,7 +828,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         return null
       }
     },
-    [pushToast],
+    [navigate, pushToast],
   )
 
   const play = useCallback(
@@ -831,14 +875,14 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           (job.status === 'running' || job.status === 'queued'),
       )
       if (activeInstallJob) {
-        setDownloadsOpen(true)
+        navigate('tasks')
         return
       }
       if (!installation.installed) {
         try {
           const job = await api.installations.install(installationId)
           setPendingLaunch({ installationId, jobId: job.id })
-          setDownloadsOpen(true)
+          navigate('tasks')
           pushToast({
             level: 'info',
             title: 'Installing Minecraft',
@@ -864,7 +908,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     if (!job) return
     if (job.status === 'completed') {
       setPendingLaunch(null)
-      setDownloadsOpen(false)
       void launchGame(pendingLaunch.installationId)
     } else if (job.status === 'failed' || job.status === 'cancelled') {
       setPendingLaunch(null)
@@ -1139,8 +1182,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       toasts,
       pushToast,
       dismissToast,
-      downloadsOpen,
-      setDownloadsOpen,
+      horizonInstallJob,
+      horizonNativeJob,
       installDialog,
       openInstallDialog,
       closeInstallDialog,
@@ -1239,7 +1282,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       deleteInstallation,
       dismissSetup,
       dismissToast,
-      downloadsOpen,
       duplicateInstallation,
       game,
       installDialog,
@@ -1256,6 +1298,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       launchHorizon,
       launchingHorizonTag,
       horizonTarget,
+      horizonInstallJob,
+      horizonNativeJob,
       selectHorizonTarget,
       launchingId,
       loadBootstrap,

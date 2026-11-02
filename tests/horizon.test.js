@@ -245,6 +245,44 @@ test('only Aqua-installed Horizon builds with a marker and client are listed', a
   assert.equal(selectedHorizonBuild([]), null)
 })
 
+test('native builds are listed with the mods they compiled', async (t) => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'aqua-horizon-native-builds-'))
+  t.after(() => fsp.rm(root, { recursive: true, force: true }))
+  const versionsRoot = path.join(root, 'versions')
+  const base = await createBuild(versionsRoot, 'v0.2.97')
+  const tag = 'native-0123456-abcdefabcdef'
+  const directory = path.join(versionsRoot, tag)
+  await fsp.cp(base, directory, { recursive: true })
+  await fsp.writeFile(
+    path.join(directory, '.aqua-horizon.json'),
+    JSON.stringify({
+      kind: 'aqua-horizon-native',
+      schema: 1,
+      tag,
+      gameVersion: HORIZON_GAME_VERSION,
+      baseTag: 'v0.2.97',
+      revision: '0123456789abcdef0123456789abcdef01234567',
+      mixins: 'abcdef0123456789abcdef0123456789abcdef01',
+      profile: 'fast',
+      mods: ['zoom', 'appleskin'],
+      installedAt: '2026-10-31T12:00:00.000Z',
+      javaMajor: 25,
+    }),
+  )
+
+  const builds = await readInstalledHorizonBuilds({ versionsRoot, platform: 'win32' })
+  const native = builds.find((build) => build.tag === tag)
+
+  assert.ok(native)
+  assert.equal(native.native, true)
+  assert.equal(native.baseTag, 'v0.2.97')
+  assert.equal(native.revision, '0123456789abcdef0123456789abcdef01234567')
+  assert.equal(native.profile, 'fast')
+  assert.equal(native.nativeMods, 2)
+  assert.equal(builds.find((build) => build.tag === 'v0.2.97').native, false)
+  assert.equal(selectedHorizonBuild(builds).tag, tag)
+})
+
 test('Horizon status uses Aqua paths and launch starts the Rust client directly', async (t) => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'aqua-horizon-status-'))
   t.after(() => fsp.rm(root, { recursive: true, force: true }))

@@ -56,6 +56,8 @@ export function registerIpc({
   bedrockVersionsService,
   bedrockAddonsService,
   horizonService,
+  horizonRegistryService,
+  horizonNativeBuilder,
   installationService,
   accountManager,
   javaService,
@@ -288,6 +290,42 @@ export function registerIpc({
       requireString(minecraftVersion, 'Minecraft version', 32),
     )
   })
+  ipcMain.handle('horizon:mods', async () => horizonService.listMods())
+  ipcMain.handle('horizon:importMod', async (_event, { filePath } = {}) => {
+    return horizonService.importMod(requireString(filePath, 'Horizon mod file', 4000))
+  })
+  ipcMain.handle('horizon:toggleMod', async (_event, { filename, kind } = {}) => {
+    return horizonService.toggleMod(
+      requireString(filename, 'Horizon mod', 260),
+      requireString(kind, 'Horizon mod type', 32),
+    )
+  })
+  ipcMain.handle('horizon:removeMod', async (_event, { filename, kind } = {}) => {
+    return horizonService.removeMod(
+      requireString(filename, 'Horizon mod', 260),
+      requireString(kind, 'Horizon mod type', 32),
+    )
+  })
+  ipcMain.handle('horizon:modsFolder', async (_event, { kind = 'content' } = {}) => {
+    return horizonService.openModsFolder(requireString(kind, 'Horizon mod type', 32))
+  })
+  ipcMain.handle('horizon:registry', async (_event, { force = false } = {}) => {
+    return horizonRegistryService.list({ force: Boolean(force) })
+  })
+  ipcMain.handle('horizon:installProject', async (_event, { projectId, version = null } = {}) => {
+    return horizonRegistryService.install(
+      requireString(projectId, 'Horizon project', 128),
+      version ? requireString(version, 'Horizon version', 64) : null,
+    )
+  })
+  ipcMain.handle('horizon:nativeStatus', async () => horizonNativeBuilder.status())
+  ipcMain.handle('horizon:buildNative', async (_event, { profile = null } = {}) => {
+    if (profile != null && profile !== 'fast' && profile !== 'release') {
+      throw new Error('Unknown Horizon build profile.')
+    }
+    return horizonNativeBuilder.build({ profile })
+  })
+  ipcMain.handle('horizon:cancelNativeBuild', async () => horizonNativeBuilder.cancel())
 
   const contentLabel = (contentType) =>
     ({ mod: 'mod', modpack: 'modpack', resourcepack: 'resource pack', shader: 'shader pack' })[contentType] || 'content'
@@ -836,6 +874,18 @@ export function registerIpc({
       buttonLabel: 'Choose folder',
     })
     if (result.canceled || !result.filePaths[0]) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:chooseHorizonMod', async (event) => {
+    const win = senderWindow(event)
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose a Horizon mod',
+      properties: ['openFile'],
+      buttonLabel: 'Import mod',
+      filters: [{ name: 'Horizon mods', extensions: ['hnmod', 'hmod', 'zip'] }],
+    })
+    if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]
   })
 

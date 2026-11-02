@@ -4,16 +4,15 @@ import { Titlebar } from './components/layout/Titlebar'
 import { Sidebar } from './components/layout/Sidebar'
 import { BootScreen } from './components/layout/BootScreen'
 import { LaunchErrorDialog } from './components/layout/LaunchErrorDialog'
-import { DownloadsDrawer } from './components/dialogs/DownloadsDrawer'
 import { InstallationDialog } from './components/dialogs/InstallationDialog'
 import { SetupWizard } from './components/dialogs/SetupWizard'
 import { AuthModal } from './components/dialogs/AuthModal'
 import { ToastHost } from './components/ui/overlays'
 import { HomePage } from './pages/HomePage'
 import { InstallationsPage } from './pages/InstallationsPage'
+import { TasksPage } from './pages/TasksPage'
 import { WorldsPage } from './pages/WorldsPage'
 import { ServersPage } from './pages/ServersPage'
-import { VersionsPage } from './pages/VersionsPage'
 import { ModsPage } from './pages/ModsPage'
 import { AccountPage } from './pages/AccountPage'
 import { LogsPage } from './pages/LogsPage'
@@ -25,12 +24,12 @@ function Page() {
   switch (route.page) {
     case 'installations':
       return <InstallationsPage />
+    case 'tasks':
+      return <TasksPage />
     case 'worlds':
       return <WorldsPage />
     case 'servers':
       return <ServersPage />
-    case 'versions':
-      return <VersionsPage />
     case 'mods':
       return <ModsPage />
     case 'account':
@@ -59,9 +58,9 @@ export default function App() {
     const labels: Record<string, string> = {
       home: 'Home',
       installations: 'Installations',
+      tasks: 'Tasks',
       worlds: 'Worlds',
       servers: 'Servers',
-      versions: 'Versions',
       mods: 'Extra content',
       account: 'Account',
       logs: 'Logs & diagnostics',
@@ -97,7 +96,6 @@ export default function App() {
         </div>
       ) : null}
 
-      <DownloadsDrawer />
       <InstallationDialog />
       <SetupWizard />
       <AuthModal />

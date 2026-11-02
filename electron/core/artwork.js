@@ -23,6 +23,16 @@ const OUTPUT_QUALITY = 86
 // Bumped whenever the artwork pipeline changes, so stale cache entries from an
 // older build are ignored instead of being served forever.
 const DROP_CACHE_VERSION = 5
+// Aqua serves its own version artwork, so the dashboard does not have to unpack
+// Mojang's 4K wallpaper archives. Mojang's packs remain the fallback.
+const AQUA_ARTWORK_BASE = 'https://aqua.ch1n.dev/api/launcher/artwork'
+const AQUA_ARTWORK_TTL_MS = 24 * 60 * 60 * 1000
+// A version with no art yet is retried later, so newly uploaded art appears.
+const AQUA_ARTWORK_MISS_TTL_MS = 10 * 60 * 1000
+const MAX_AQUA_ARTWORK_BYTES = 12 * 1024 * 1024
+// Newer releases are probed in order until the update's artwork is found.
+const AQUA_ARTWORK_PROBES = 8
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const PAGE_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; AquaLauncher/1.0.0)', Accept: 'text/html' }
 
 const MIME_BY_EXTENSION = {
@@ -51,6 +61,45 @@ export function plainText(html) {
   return String(html ?? '')
     .replace(/&#x26;|&amp;/gi, '&')
     .replace(/<[^>]*>/g, ' ')
+}
+
+/** The Aqua artwork endpoint for a Minecraft version. */
+export function aquaArtworkUrl(versionId) {
+  return `${AQUA_ARTWORK_BASE}/${encodeURIComponent(String(versionId ?? '').trim())}.png`
+}
+
+/** Dotted numeric versions compare part by part, missing parts counting as 0. */
+function compareVersionParts(left, right) {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = Number(left[index] ?? 0) - Number(right[index] ?? 0)
+    if (difference) return difference
+  }
+  return 0
+}
+
+/**
+ * Releases newer than a version inside its own update line. Artwork is named
+ * after the last release of each update, so the first of these that exists is
+ * the art covering the version. The line is the leading major.minor, which
+ * keeps 1.5 from borrowing 1.6's art.
+ */
+export function laterReleasesInLine(versions, versionId) {
+  const id = String(versionId ?? '').trim()
+  const line = /^(\d+)\.(\d+)/.exec(id)
+  if (!line) return []
+  const asked = (id.match(/\d+/g) || []).slice(0, 3).map(Number)
+  const later = []
+  for (const entry of Array.isArray(versions) ? versions : []) {
+    if (entry?.type !== 'release') continue
+    const releaseId = String(entry.id ?? '')
+    const parts = releaseId.split('.')
+    if (parts.length < 3 || parts.some((part) => !/^\d+$/.test(part))) continue
+    if (parts[0] !== line[1] || parts[1] !== line[2]) continue
+    const numbers = parts.map((part) => Number(part))
+    if (!(compareVersionParts(numbers, asked) > 0)) continue
+    later.push({ id: releaseId, numbers })
+  }
+  return later.sort((a, b) => compareVersionParts(a.numbers, b.numbers)).map((entry) => entry.id)
 }
 
 /** The versions that can stand in for a profile's version, newest first. */
@@ -200,8 +249,9 @@ async function encodeWallpaper(bytes) {
  * drop each version belongs to, cached locally so it works offline.
  */
 export class ArtworkService {
-  constructor({ paths, logger }) {
+  constructor({ paths, versions = null, logger }) {
     this.paths = paths
+    this.versions = versions
     this.logger = logger
     this.index = null
     this.indexAt = 0
@@ -210,6 +260,7 @@ export class ArtworkService {
     this.dropsAt = 0
     this.pendingDrops = null
     this.notes = new Map()
+    this.aquaMisses = new Map()
   }
 
   async getPatchNotes({ force = false } = {}) {
@@ -412,9 +463,115 @@ export class ArtworkService {
     return { bytes, mime: MIME_BY_EXTENSION[extension] || 'image/jpeg', cached: false }
   }
 
+  /**
+   * Aqua's own artwork for a version, cached on disk so it keeps working
+   * offline. A miss is remembered briefly so a version without art does not
+   * hit the endpoint on every render.
+   */
+  async aquaArtwork(versionId) {
+    const cacheFile = this.artworkCachePath(versionId)
+    const cached = await fsp.readFile(cacheFile).catch(() => null)
+    if (cached?.length) {
+      const stat = await fsp.stat(cacheFile).catch(() => null)
+      if (stat && Date.now() - stat.mtimeMs < AQUA_ARTWORK_TTL_MS) {
+        return { version: versionId, bytes: cached, mime: 'image/png', cached: true }
+      }
+    }
+
+    let resolved = null
+    const exact = await this.downloadAquaArt(versionId)
+    if (exact) resolved = { version: versionId, bytes: exact }
+    if (!resolved) {
+      const fallbacks = await this.aquaFallbacks(versionId)
+      for (const candidate of fallbacks.slice(0, AQUA_ARTWORK_PROBES)) {
+        const bytes = await this.downloadAquaArt(candidate)
+        if (bytes) {
+          resolved = { version: candidate, bytes }
+          break
+        }
+      }
+    }
+
+    if (resolved) {
+      // Repeat lookups of this version read the same file.
+      if (resolved.version !== versionId) await fsp.writeFile(cacheFile, resolved.bytes).catch(() => {})
+      return { ...resolved, mime: 'image/png', cached: false }
+    }
+    // A stale file still beats no background when the endpoint is unreachable.
+    return cached?.length ? { version: versionId, bytes: cached, mime: 'image/png', cached: true } : null
+  }
+
+  /** Where a version's artwork lives on disk. */
+  artworkCachePath(versionId) {
+    return path.join(this.paths.artworkCacheRoot, `${sanitizeFileName(versionId, 'version')}.aqua.png`)
+  }
+
+  /** A cached PNG that has not gone stale yet. */
+  async freshAquaArt(versionId) {
+    const file = this.artworkCachePath(versionId)
+    const stat = await fsp.stat(file).catch(() => null)
+    if (!stat || Date.now() - stat.mtimeMs >= AQUA_ARTWORK_TTL_MS) return null
+    const bytes = await fsp.readFile(file).catch(() => null)
+    return bytes?.length ? bytes : null
+  }
+
+  /** Download one artwork file, remembering misses so they are not retried. */
+  async downloadAquaArt(versionId) {
+    if (Date.now() - (this.aquaMisses.get(versionId) || 0) < AQUA_ARTWORK_MISS_TTL_MS) return null
+    const cached = await this.freshAquaArt(versionId)
+    if (cached) return cached
+    try {
+      const response = await fetchWithRetry(
+        aquaArtworkUrl(versionId),
+        { headers: { Accept: 'image/png', 'User-Agent': 'AquaLauncher/1.0.0' } },
+        { attempts: 1, timeoutMs: 15_000, logger: this.logger },
+      )
+      const bytes = Buffer.from(await response.arrayBuffer())
+      if (!bytes.length || bytes.length > MAX_AQUA_ARTWORK_BYTES) throw new Error('The artwork is unusable.')
+      if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('The artwork is not a PNG image.')
+      await ensureDir(this.paths.artworkCacheRoot)
+      await fsp.writeFile(this.artworkCachePath(versionId), bytes)
+      this.aquaMisses.delete(versionId)
+      this.logger.info('Downloaded Aqua artwork', { version: versionId })
+      return bytes
+    } catch (error) {
+      this.aquaMisses.set(versionId, Date.now())
+      this.logger.debug('No Aqua artwork for this version', { version: versionId, message: error.message })
+      return null
+    }
+  }
+
+  /** Later releases whose update art could cover this version. */
+  async aquaFallbacks(versionId) {
+    if (!this.versions) return []
+    try {
+      const manifest = await this.versions.getManifest()
+      return laterReleasesInLine(manifest?.versions, versionId)
+    } catch (error) {
+      this.logger.debug('Could not look up newer releases for artwork', {
+        version: versionId,
+        message: error.message,
+      })
+      return []
+    }
+  }
+
   async getVersionArt(versionId) {
     const requested = typeof versionId === 'string' ? versionId.trim() : ''
     if (!requested) return null
+    try {
+      const aqua = await this.aquaArtwork(requested)
+      if (aqua) {
+        return {
+          version: aqua.version,
+          title: `Minecraft ${aqua.version}`,
+          type: 'aqua',
+          dataUrl: `data:${aqua.mime};base64,${aqua.bytes.toString('base64')}`,
+        }
+      }
+    } catch (error) {
+      this.logger.warn('Could not load Aqua artwork', { version: requested, message: error.message })
+    }
     try {
       const resolved = await this.resolveDrop(requested)
       if (!resolved) return null
