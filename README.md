@@ -1,4 +1,6 @@
-# Aqua Launcher
+<p align="center">
+  <img src="https://aqua.ch1n.dev/assets/og.jpg" alt="Aqua Website: More ways to play!" width="100%">
+</p>
 
 ## THIS DOES NOT PROMOTE PIRACY MICROSOFT MOJANG VALIDATION IS UNDER APPROVAL
 
