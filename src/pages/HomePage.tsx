@@ -30,7 +30,7 @@ import {
   shortPath,
   versionTypeLabel,
 } from '../lib/format'
-import { BEDROCK_ENABLED, HORIZON_ENABLED, MICROSOFT_AUTH_ENABLED } from '../lib/features'
+import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../lib/features'
 import { loaderLabel } from '../lib/loaders'
 import { useLauncher } from '../state/LauncherProvider'
 import type { ActivityEntry, DownloadJob, Installation, LoaderType, ServerEntry } from '../lib/types'
@@ -287,9 +287,7 @@ export function HomePage() {
 
   const subtitle = activeAccount
     ? 'Launch your Play target or manage installations, versions, and logs.'
-    : MICROSOFT_AUTH_ENABLED
-      ? 'Add an offline or Microsoft profile to launch the game. You can create an installation first if you prefer.'
-      : 'Add an offline profile to launch the game. You can create an installation first if you prefer.'
+    : 'Sign in with Microsoft to launch the game. You can create an installation first if you prefer.'
 
   return (
     <div

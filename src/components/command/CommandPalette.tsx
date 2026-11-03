@@ -245,7 +245,7 @@ export function CommandPalette() {
       add({ id: 'open-game-folder', label: 'Open game folder', description: selectedInstallation.name, group: 'Commands', icon: <FolderOpen />, run: () => openInstallationFolder(selectedInstallation.id) })
       add({ id: 'check-updates', label: 'Check content updates', description: `Check mods installed in ${selectedInstallation.name}`, group: 'Commands', icon: <RefreshCw />, run: () => navigate('mods', { contentType: 'mod', action: 'check-updates' }) })
     }
-    add({ id: 'add-profile', label: 'Add player profile', description: 'Offline or Microsoft account', group: 'Commands', icon: <UserRound />, run: () => openAuth() })
+    add({ id: 'add-profile', label: 'Add player profile', description: 'Microsoft account', group: 'Commands', icon: <UserRound />, run: () => openAuth() })
 
     if (settings) {
       for (const [id, label] of SETTINGS_SECTIONS) {

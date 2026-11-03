@@ -14,7 +14,6 @@ import { analyzeServerCompatibility, type JoinWarningState } from '../lib/server
 import type {
   ActivityEntry,
   AppNotification,
-  AuthMode,
   AuthState,
   BedrockCatalog,
   BedrockDownloadProgress,
@@ -97,11 +96,9 @@ interface LauncherContextValue {
   completeSetup: (extra?: Partial<Settings>) => Promise<void>
   dismissSetup: () => Promise<void>
   authOpen: boolean
-  authInitialMode: AuthMode | null
-  openAuth: (mode?: AuthMode) => void
+  openAuth: () => void
   closeAuth: () => void
   beginAuth: () => Promise<void>
-  signInOffline: (name: string) => Promise<void>
   cancelAuth: () => Promise<void>
   launchError: LaunchErrorState | null
   clearLaunchError: () => void
@@ -213,7 +210,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [installDialog, setInstallDialog] = useState<InstallDialogState | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
-  const [authInitialMode, setAuthInitialMode] = useState<AuthMode | null>(null)
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null)
   const [launchingId, setLaunchingId] = useState<string | null>(null)
   const [joinWarning, setJoinWarning] = useState<JoinWarningState | null>(null)
@@ -858,7 +854,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         const compatibility = analyzeServerCompatibility({
           server: { edition: 'java', installationId: boundId },
           installation,
-          accountType: account.type,
           status,
           usedFallback: Boolean(boundId && !bound),
         })
@@ -980,7 +975,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         pushToast({
           level: 'info',
           title: 'Add a player profile',
-          message: 'Connect Microsoft or create an offline profile to launch Minecraft.',
+          message: 'Sign in with Microsoft to launch Minecraft.',
         })
         return
       }
@@ -1197,8 +1192,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     }
   }, [pushToast, saveSettings])
 
-  const openAuth = useCallback((mode?: AuthMode) => {
-    setAuthInitialMode(mode || null)
+  const openAuth = useCallback(() => {
     setAuthOpen(true)
     const status = dataRef.current?.auth.status
     if (status !== 'waiting' && status !== 'finalizing') {
@@ -1210,10 +1204,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   const beginAuth = useCallback(async () => {
     await api.accounts.beginLogin()
-  }, [])
-
-  const signInOffline = useCallback(async (_name: string) => {
-    throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
   }, [])
 
   const cancelAuth = useCallback(async () => {
@@ -1326,11 +1316,9 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       completeSetup,
       dismissSetup,
       authOpen,
-      authInitialMode,
       openAuth,
       closeAuth,
       beginAuth,
-      signInOffline,
       cancelAuth,
       launchError,
       clearLaunchError,
@@ -1404,7 +1392,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       registerBedrockVersion,
       installBedrockVersion,
       removeBedrockVersion,
-      authInitialMode,
       authPhase,
       bedrock,
       bedrockError,
@@ -1465,7 +1452,6 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       refreshVersions,
       retryLaunch,
       route,
-      signInOffline,
       saveSettings,
       selectedInstallation,
       sessions,

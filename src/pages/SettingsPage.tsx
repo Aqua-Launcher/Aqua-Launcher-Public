@@ -30,7 +30,6 @@ import {
   Wrench,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
-import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
 import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { javaPurpose } from '../lib/java-info'
 import { useLauncher } from '../state/LauncherProvider'
@@ -1243,9 +1242,7 @@ function SettingsWorkspace({
             <div className="settings-section__head">
               <h2>Advanced</h2>
               <p>
-                {MICROSOFT_AUTH_ENABLED
-                  ? 'Arguments and Microsoft sign-in configuration. Change these only if you know the impact.'
-                  : 'JVM and game arguments. Change these only if you know the impact.'}
+                JVM and game arguments. Change these only if you know the impact.
               </p>
             </div>
             <div className="settings-card">
@@ -1273,52 +1270,6 @@ function SettingsWorkspace({
                 </Field>
               </div>
 
-              {MICROSOFT_AUTH_ENABLED ? (
-                <>
-                  <div className="settings-divider" />
-
-                  <div className="settings-card__toolbar">
-                    <div>
-                      <span className="section-kicker">Microsoft sign-in</span>
-                      <p className="settings-muted">Your Azure application (client) ID. Required for account sign-in.</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<ExternalLink />}
-                      onClick={() =>
-                        void api.openExternal(
-                          'https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app',
-                        )
-                      }
-                    >
-                      Azure guide
-                    </Button>
-                  </div>
-                  <Field
-                    label="Application (client) ID"
-                    hint="Register a desktop app with http://localhost as a mobile/desktop redirect. This is public metadata."
-                  >
-                    <input
-                      className="input input--mono"
-                      value={form.microsoftClientId}
-                      onChange={(event) => update('microsoftClientId', event.target.value)}
-                      placeholder="00000000-0000-0000-0000-000000000000"
-                      spellCheck={false}
-                    />
-                  </Field>
-                  {form.microsoftClientId && form.microsoftClientId !== settings.microsoftClientId && launcher.accounts?.accounts.length ? (
-                    <div className="callout callout--warning">
-                      <TriangleAlert />
-                      Changing the app ID invalidates existing sign-in sessions. You may need to sign in again.
-                    </div>
-                  ) : null}
-                  <p className="settings-hint">
-                    Aqua uses the OAuth 2.0 authorization code flow with PKCE and a loopback callback. Microsoft requires
-                    third-party apps to be approved for Minecraft services before the final token exchange succeeds.
-                  </p>
-                </>
-              ) : null}
             </div>
           </section>
 

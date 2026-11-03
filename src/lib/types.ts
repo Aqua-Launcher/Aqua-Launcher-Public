@@ -1,5 +1,4 @@
 export type ThemeName = 'midnight' | 'slate'
-export type AuthMode = 'offline' | 'microsoft'
 export type AccentName = 'aqua' | 'ocean' | 'steel'
 export type FontFamily = 'minecraft' | 'quicksand'
 
@@ -150,7 +149,6 @@ export interface Settings {
   window: { width: number; height: number; fullscreen: boolean }
   jvmArgs: string
   gameArgs: string
-  microsoftClientId: string
   minecraftSettings: { sync: boolean }
   backups: BackupPolicy
   contentFilters: ContentFilters

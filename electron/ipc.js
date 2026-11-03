@@ -441,9 +441,6 @@ export function registerIpc({
   ipcMain.handle('accounts:list', async () => accountManager.accountsPayload())
   ipcMain.handle('accounts:getAuthState', async () => accountManager.getAuthState())
   ipcMain.handle('accounts:beginLogin', async () => accountManager.beginLogin())
-  ipcMain.handle('accounts:signInOffline', async (_event, { name }) => {
-    return accountManager.signInOffline(requireString(name, 'Username', 16))
-  })
   ipcMain.handle('accounts:cancelLogin', async () => {
     accountManager.cancelLogin()
     return true

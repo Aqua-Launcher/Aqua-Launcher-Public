@@ -71,7 +71,7 @@ export function SetupWizard() {
           </button>
           <Button
             variant="primary"
-            onClick={() => (activeAccount ? void handleFinish() : openAuth('microsoft'))}
+            onClick={() => (activeAccount ? void handleFinish() : openAuth())}
             loading={finishing}
             icon={activeAccount ? <Check /> : <KeyRound />}
           >
@@ -106,7 +106,7 @@ export function SetupWizard() {
               </div>
             ) : (
               <div className="setup__provider">
-                <Button variant="primary" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
+                <Button variant="primary" icon={<KeyRound />} onClick={() => openAuth()}>
                   Connect Microsoft
                 </Button>
               </div>
@@ -114,7 +114,7 @@ export function SetupWizard() {
 
             <p className="setup__name-hint">
               <Sparkles />
-              This build supports Minecraft: Java Edition only. Bedrock and offline profiles are not available.
+              This build supports Minecraft: Java Edition only. Bedrock is not available.
             </p>
 
             <div className="setup__a11y">

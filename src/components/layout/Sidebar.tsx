@@ -16,7 +16,6 @@ import {
   UserRound,
 } from 'lucide-react'
 import { CONTENT_TYPES } from '../../lib/contentTypes'
-import { MICROSOFT_AUTH_ENABLED } from '../../lib/features'
 import { useLauncher } from '../../state/LauncherProvider'
 import { useNow } from '../../lib/hooks'
 import { elapsedSince } from '../../lib/format'
@@ -174,20 +173,16 @@ export function Sidebar() {
           <ChevronRight size={14} className="sidebar__chevron" />
         </button>
 
-        <button type="button" className="sidebar__account" onClick={handleAccount} aria-label={activeAccount ? 'Open account' : 'Add a player profile'}>
+        <button type="button" className="sidebar__account" onClick={handleAccount} aria-label={activeAccount ? 'Open account' : 'Sign in with Microsoft'}>
           <Avatar name={activeAccount?.name} src={activeAccount?.avatarDataUrl} size="md" />
           <span className="sidebar__account-copy">
             <span className="sidebar__account-name">{activeAccount?.name || 'Add profile'}</span>
             <span className="sidebar__account-meta">
               {activeAccount
-                ? activeAccount.type === 'offline'
-                  ? 'Offline profile'
-                  : activeAccount.sessionExpired
-                    ? 'Session expired'
-                    : 'Microsoft account'
-                : MICROSOFT_AUTH_ENABLED
-                  ? 'Offline or Microsoft'
-                  : 'Offline profile'}
+                ? activeAccount.sessionExpired
+                  ? 'Session expired'
+                  : 'Microsoft account'
+                : 'Sign in with Microsoft'}
             </span>
           </span>
           <ChevronRight size={14} className="sidebar__chevron" />

@@ -1,4 +1,4 @@
-import type { Account, Installation, ServerEdition, ServerEntry, ServerStatus } from './types'
+import type { Installation, ServerEdition, ServerEntry, ServerStatus } from './types'
 
 export type ServerCompatibilityLevel = 'ok' | 'warning' | 'error' | 'unknown'
 
@@ -32,7 +32,6 @@ export interface JoinWarningState {
 interface CompatibilityInput {
   server: Pick<ServerEntry, 'edition' | 'installationId'> | null
   installation: Pick<Installation, 'name' | 'versionId' | 'loader' | 'installed'> | null
-  accountType: Account['type'] | null
   status: ServerStatus | null
   /** True when the saved profile disappeared and the active profile is used. */
   usedFallback?: boolean
@@ -67,7 +66,6 @@ export function detectOnlineMode(status: ServerStatus | null): boolean | null {
 export function analyzeServerCompatibility({
   server,
   installation,
-  accountType,
   status,
   usedFallback = false,
 }: CompatibilityInput): ServerCompatibility {
@@ -120,14 +118,6 @@ export function analyzeServerCompatibility({
       })
     }
 
-    if (accountType === 'offline' && detectOnlineMode(status) === true) {
-      issues.push({
-        code: 'account',
-        title: 'Offline profile',
-        detail:
-          'This server appears to use online-mode authentication. Offline profiles cannot complete a Microsoft session, so the join may be refused.',
-      })
-    }
   }
 
   if (issues.length) {

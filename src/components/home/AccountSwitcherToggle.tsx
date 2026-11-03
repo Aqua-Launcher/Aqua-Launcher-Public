@@ -22,7 +22,7 @@ export function AccountSwitcherToggle({
   installation: Installation
   disabled?: boolean
 }) {
-  const { activeAccount, pushToast } = useLauncher()
+  const { pushToast } = useLauncher()
   const [status, setStatus] = useState<Status>('checking')
   const [disabledFile, setDisabledFile] = useState<string | null>(null)
   const [installing, setInstalling] = useState(false)
@@ -133,9 +133,7 @@ export function AccountSwitcherToggle({
           ? 'Microsoft sign-in in-game'
           : status === 'disabled'
             ? 'Click to enable it'
-            : activeAccount?.type === 'offline'
-              ? 'Launch offline, sign in in-game'
-              : 'Install in-game sign-in'
+            : 'Install in-game sign-in'
 
   return (
     <label

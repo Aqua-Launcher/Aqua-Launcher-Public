@@ -56,7 +56,6 @@ export function createDefaultSettings({ totalMemMb, instancesRoot }) {
     window: { width: 1280, height: 720, fullscreen: false },
     jvmArgs: '',
     gameArgs: '',
-    microsoftClientId: '',
     minecraftSettings: { sync: true },
     backups: normalizeBackupPolicy({}),
     contentFilters: {},
@@ -179,7 +178,6 @@ export function normalizeSettings(raw, defaults) {
     },
     jvmArgs: asString(source.jvmArgs, base.jvmArgs),
     gameArgs: asString(source.gameArgs, base.gameArgs),
-    microsoftClientId: asString(source.microsoftClientId, base.microsoftClientId).trim(),
     minecraftSettings: {
       sync: asBoolean(minecraftSettings.sync, base.minecraftSettings?.sync ?? true),
     },
@@ -288,11 +286,6 @@ export async function validateSettings(settings, context) {
     settings.backups.maxTotalMb > 102_400
   ) {
     errors.push('The backup storage limit must be between 0 and 102,400 MB.')
-  }
-
-  const clientId = settings.microsoftClientId
-  if (clientId && !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(clientId)) {
-    errors.push('The Microsoft application (client) ID must be a valid GUID.')
   }
 
   try {

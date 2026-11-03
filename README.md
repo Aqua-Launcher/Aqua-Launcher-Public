@@ -35,7 +35,7 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Windows 10 or 11 (64-bit)** is the primary supported platform. The architecture is cross-platform, and macOS/Linux packaging targets are included, but those builds are not actively tested.
 - **Node.js 22 or newer** and npm for development.
 - An internet connection to fetch the Minecraft manifest, game files, assets, and Java runtimes.
-- A Microsoft Azure application ID approved for Minecraft services. Sign-in is Microsoft-only.
+- A Microsoft Azure application ID approved for Minecraft services, placed in `private/microsoft.json`. Sign-in is Microsoft-only.
 
 ## Getting started
 
@@ -91,7 +91,7 @@ Aqua signs in with Microsoft. The flow uses OAuth authorization code with PKCE a
 
 Sign in with the account that owns Minecraft: Java Edition. Aqua loads your player name and skin, refreshes the session before each launch, and stores only an encrypted refresh token. The Azure application must be approved for Minecraft API access by Mojang.
 
-Microsoft sign-in requires an Azure application (client) ID, configured from **Account → Connect Microsoft** or **Settings**. Tokens never touch `localStorage` or the renderer process.
+Aqua reads its own Azure application credentials on the main process from a git-ignored `private/microsoft.json` (`{"clientId": "<application-id>", "clientSecret": "<optional>"}`). There is no sign-in configuration in the window, and tokens never touch `localStorage` or the renderer process.
 
 ## Extra content
 

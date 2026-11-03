@@ -33,6 +33,9 @@ release
 screenshots
 test-results
 
+# Azure/Mojang app credentials used by the main process only
+private/
+
 # Portable-mode runtime data
 AquaData/
 portable.txt

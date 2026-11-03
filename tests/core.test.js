@@ -245,10 +245,6 @@ test('settings validation rejects unsafe values and accepts normal user folders'
       ),
       /Minimum memory cannot be greater than maximum memory/,
     )
-    await assert.rejects(
-      validateSettings({ ...defaults, microsoftClientId: 'not-a-guid' }, { totalMemMb: 16_384 }),
-      /valid GUID/,
-    )
     const protectedPath = process.platform === 'win32' ? 'C:\\Windows' : '/etc'
     await assert.rejects(
       validateSettings({ ...defaults, defaultGameDir: protectedPath }, { totalMemMb: 16_384 }),

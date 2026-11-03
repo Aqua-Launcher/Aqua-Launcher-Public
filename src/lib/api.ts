@@ -203,7 +203,6 @@ export interface AquaApi {
     list: () => Promise<AccountsState>
     getAuthState: () => Promise<AuthState>
     beginLogin: () => Promise<{ url: string }>
-    signInOffline: (name: string) => Promise<AccountsState>
     cancelLogin: () => Promise<boolean>
     switch: (id: string) => Promise<unknown>
     signOut: (id: string) => Promise<AccountsState>

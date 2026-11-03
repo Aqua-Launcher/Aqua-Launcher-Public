@@ -5,23 +5,17 @@ import http from 'node:http'
 import path from 'node:path'
 import { safeStorage, shell } from 'electron'
 import { atomicWriteFile, errorMessage, fetchWithRetry } from './util.js'
+import { describeMissingCredentials, readMicrosoftCredentials } from './private-credentials.js'
 
-const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
-const AUTHORIZE_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize'
+// /common accepts both personal Microsoft accounts and work/school accounts, so
+// an app registered as "any organization + personal" can sign in either way.
+const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
+const AUTHORIZE_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
 const SCOPES = 'XboxLive.signin offline_access'
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 
 function base64Url(buffer) {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-}
-
-/** Deterministic offline UUID in the same format used by Minecraft servers. */
-function offlinePlayerUuid(name) {
-  const bytes = crypto.createHash('md5').update(`OfflinePlayer:${name}`, 'utf8').digest()
-  bytes[6] = (bytes[6] & 0x0f) | 0x30
-  bytes[8] = (bytes[8] & 0x3f) | 0x80
-  const hex = bytes.toString('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function friendlyMicrosoftError(status, body) {
@@ -46,6 +40,9 @@ function friendlyMicrosoftError(status, body) {
   }
   if (aad === 'AADSTS9002326') {
     return 'The Azure redirect URI is not configured as a mobile and desktop application. Add http://localhost as a mobile/desktop redirect.'
+  }
+  if (aad === 'AADSTS90023') {
+    return 'This Azure app is registered as a public client, so Microsoft refuses a client secret. Aqua retries sign-in without it; remove clientSecret from private/microsoft.json if this keeps appearing.'
   }
   if (code === 'invalid_grant' || /expired|revoked/i.test(description)) {
     return 'Your Microsoft session has expired. Sign in again to continue.'
@@ -81,12 +78,29 @@ async function tokenRequest(params) {
   if (!response.ok || body?.error) {
     const error = new Error(friendlyMicrosoftError(response.status, text))
     error.status = response.status
+    error.aadCode = `${body?.error_description || body?.error || ''}`.match(/AADSTS\d+/)?.[0] || ''
     error.authError = ['invalid_grant', 'invalid_client', 'unauthorized_client', 'consent_required'].includes(
       body?.error,
     )
     throw error
   }
   return body
+}
+
+/**
+ * Exchanges token parameters, adding the app secret only when one is configured.
+ * A registration with public client flows enabled rejects a secret outright
+ * (AADSTS90023), so that specific refusal is retried without it: PKCE desktop
+ * clients never need a secret, and confidential apps still get theirs.
+ */
+async function requestToken(params, clientSecret) {
+  if (!clientSecret) return tokenRequest(params)
+  try {
+    return await tokenRequest({ ...params, client_secret: clientSecret })
+  } catch (error) {
+    if (error.aadCode !== 'AADSTS90023') throw error
+    return tokenRequest(params)
+  }
 }
 
 async function postJson(url, body, { signal } = {}) {
@@ -209,7 +223,7 @@ export class AccountManager {
     const validIds = new Set(this.tokens.keys())
     let changed = false
     for (const account of this.store.accounts) {
-      if (account.type !== 'offline' && !validIds.has(account.id) && !account.sessionExpired) {
+      if (!validIds.has(account.id) && !account.sessionExpired) {
         await this.store.updateAccount(account.id, { sessionExpired: true })
         changed = true
       }
@@ -281,54 +295,10 @@ export class AccountManager {
     return this.authState
   }
 
-  async signInOffline(rawName) {
-    throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
-    if (typeof rawName !== 'string') throw new Error('Enter a username for the offline profile.')
-    const name = rawName.trim()
-    if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) {
-      throw new Error('Offline usernames must be 3–16 characters and use only letters, numbers, and underscores.')
-    }
-    const existing = this.store.accounts.find(
-      (account) => account.type === 'offline' && account.name.toLowerCase() === name.toLowerCase(),
-    )
-    const uuid = existing?.uuid || offlinePlayerUuid(name)
-    const id = existing?.id || `offline-${uuid}`
-    this.tokens.delete(id)
-    await this.store.upsertAccount({
-      id,
-      type: 'offline',
-      name,
-      uuid,
-      xuid: null,
-      addedAt: existing?.addedAt || new Date().toISOString(),
-      lastUsedAt: new Date().toISOString(),
-      expiresAt: null,
-      sessionExpired: false,
-      avatarDataUrl: null,
-    })
-    await this.store.setActiveAccount(id)
-    this.broadcastAccounts()
-    await this.store.addActivity({
-      type: 'account',
-      title: `Added offline profile ${name}`,
-      detail: 'Singleplayer and LAN only',
-      status: 'info',
-    })
-    this.emitActivity()
-    this.emitNotification({
-      level: 'success',
-      title: 'Offline profile ready',
-      message: `${name} can now launch singleplayer and LAN games.`,
-    })
-    this.logger.info('Offline profile selected', { name })
-    return this.accountsPayload()
-  }
-
   async beginLogin() {
-    const clientId = this.store.settings.microsoftClientId
-    if (!clientId) {
-      throw new Error('Add your Microsoft Azure application (client) ID before signing in.')
-    }
+    const credentials = readMicrosoftCredentials()
+    const clientId = credentials.clientId
+    if (!clientId) throw new Error(describeMissingCredentials(credentials))
     if (this.activeLogin && !this.activeLogin.settled) {
       this.cancelLogin()
     }
@@ -339,6 +309,7 @@ export class AccountManager {
     const login = {
       id: crypto.randomUUID(),
       clientId,
+      clientSecret: credentials.clientSecret,
       state,
       verifier,
       settled: false,
@@ -376,7 +347,13 @@ export class AccountManager {
         response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
         response.end(authPage(false, 'Sign-in was not completed', 'You can return to Aqua and try again.'))
         server.close()
-        this.failLogin(login, description.replace(/\+/g, ' ').slice(0, 400))
+        const detail = description.replace(/\+/g, ' ').slice(0, 400)
+        this.failLogin(
+          login,
+          oauthError === 'server_error'
+            ? `Microsoft could not complete this sign-in (server_error). The Azure app registration is likely inconsistent: set requestedAccessTokenVersion to 2 in its manifest, or create a fresh registration with a desktop redirect. Details: ${detail}`
+            : detail,
+        )
         return
       }
       const code = requestUrl.searchParams.get('code')
@@ -454,14 +431,17 @@ export class AccountManager {
         message: 'Verifying your Microsoft account…',
         startedAt: new Date().toISOString(),
       })
-      const tokenBody = await tokenRequest({
-        client_id: login.clientId,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: login.redirectUri,
-        code_verifier: login.verifier,
-        scope: SCOPES,
-      })
+      const tokenBody = await requestToken(
+        {
+          client_id: login.clientId,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: login.redirectUri,
+          code_verifier: login.verifier,
+          scope: SCOPES,
+        },
+        login.clientSecret,
+      )
       const account = await this.authenticateMinecraft(tokenBody, login.clientId)
       await this.persistAccount(account)
       this.setAuthState({
@@ -657,9 +637,6 @@ export class AccountManager {
     if (this.refreshInFlight.has(accountId)) return this.refreshInFlight.get(accountId)
     const promise = (async () => {
       const account = this.store.getAccount(accountId)
-      if (account?.type === 'offline') {
-        throw new Error('Offline profiles do not have a Microsoft session to refresh.')
-      }
       const token = this.tokens.get(accountId)
       if (!token?.refreshToken) {
         await this.store.updateAccount(accountId, { sessionExpired: true })
@@ -677,8 +654,11 @@ export class AccountManager {
         return token
       }
 
-      const clientId = token.clientId || this.store.settings.microsoftClientId
-      if (!clientId) throw new Error('Microsoft application ID is missing. Add it in Settings and sign in again.')
+      const credentials = readMicrosoftCredentials()
+      const clientId = credentials.clientId || token.clientId
+      if (!clientId) {
+        throw new Error('Microsoft sign-in is not configured for this build. Sign in again once the app credentials are in place.')
+      }
       let microsoftAccessToken = token.microsoftAccessToken
       let microsoftExpiresAt = token.microsoftExpiresAt
       let refreshToken = token.refreshToken
@@ -689,12 +669,15 @@ export class AccountManager {
 
       try {
         if (force || !microsoftValid) {
-          const refreshed = await tokenRequest({
-            client_id: clientId,
-            grant_type: 'refresh_token',
-            refresh_token: refreshToken,
-            scope: SCOPES,
-          })
+          const refreshed = await requestToken(
+            {
+              client_id: clientId,
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken,
+              scope: SCOPES,
+            },
+            credentials.clientSecret,
+          )
           microsoftAccessToken = refreshed.access_token
           microsoftExpiresAt = new Date(
             Date.now() + (Number(refreshed.expires_in) || 3600) * 1000,
@@ -743,9 +726,6 @@ export class AccountManager {
   async getLaunchCredentials(accountId) {
     const account = this.store.getAccount(accountId)
     if (!account) throw new Error('Add a player profile before launching Minecraft.')
-    if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
-    }
     const token = await this.refreshTokenFor(accountId)
     if (!token?.accessToken) throw new Error('Your Microsoft session is not available. Sign in again.')
     return {
@@ -753,16 +733,13 @@ export class AccountManager {
       uuid: account.uuid,
       name: account.name,
       xuid: token.xuid || account.xuid || '',
-      clientId: token.clientId || this.store.settings.microsoftClientId,
+      clientId: token.clientId || readMicrosoftCredentials().clientId,
       userType: 'msa',
     }
   }
 
   async switchAccount(accountId) {
     const account = await this.store.setActiveAccount(accountId)
-    if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
-    }
     try {
       await this.refreshTokenFor(accountId)
     } catch (error) {
@@ -776,9 +753,6 @@ export class AccountManager {
   async refreshAccount(accountId) {
     const account = this.store.getAccount(accountId)
     if (!account) throw new Error('Account not found.')
-    if (account.type === 'offline') {
-      throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
-    }
     await this.refreshTokenFor(accountId, { force: true })
     this.broadcastAccounts()
     return this.store.publicAccount(this.store.getAccount(accountId))
@@ -810,7 +784,6 @@ export class AccountManager {
   async restoreActiveSession() {
     const activeId = this.store.activeAccountId
     if (!activeId) return
-    if (this.store.getAccount(activeId)?.type === 'offline') return
     if (!this.tokens.has(activeId)) {
       await this.store.updateAccount(activeId, { sessionExpired: true })
       this.broadcastAccounts()

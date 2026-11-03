@@ -11,10 +11,8 @@ import {
   TriangleAlert,
   UserPlus,
   Users,
-  WifiOff,
 } from 'lucide-react'
 import { getErrorMessage } from '../lib/api'
-import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
 import { formatDateTime, relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
 import type { Account } from '../lib/types'
@@ -34,12 +32,10 @@ export function AccountPage() {
   const {
     accounts,
     activeAccount,
-    settings,
     openAuth,
     switchAccount,
     refreshAccount,
     signOut,
-    navigate,
   } = useLauncher()
   const [busyId, setBusyId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -49,7 +45,6 @@ export function AccountPage() {
 
   const allAccounts = accounts?.accounts || []
   const otherAccounts = allAccounts.filter((account) => account.id !== activeAccount?.id)
-  const configured = Boolean(settings?.microsoftClientId)
 
   const handleSwitch = async (account: Account) => {
     setBusyId(account.id)
@@ -94,7 +89,7 @@ export function AccountPage() {
         title="Account"
         subtitle="Sign in with Microsoft to play Minecraft: Java Edition. Sessions are encrypted by your operating system."
         actions={
-          <Button variant="primary" icon={<UserPlus />} onClick={() => openAuth('microsoft')}>
+          <Button variant="primary" icon={<UserPlus />} onClick={openAuth}>
             Add account
           </Button>
         }
@@ -111,24 +106,15 @@ export function AccountPage() {
             <div className="account-empty__copy">
               <h2>Connect a Microsoft account</h2>
               <p>
-                Sign in with the Microsoft account that owns Minecraft: Java Edition. Aqua uses Microsoft’s official OAuth flow, and your session is encrypted by your operating system. You can add more accounts and switch between them.
+                Sign in with the Microsoft account that owns Minecraft: Java Edition. Aqua opens Microsoft’s official
+                sign-in window and encrypts your session with your operating system. You can add more accounts and
+                switch between them.
               </p>
               <div className="account-empty__actions">
-                <Button variant="primary" size="lg" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
+                <Button variant="primary" size="lg" icon={<KeyRound />} onClick={openAuth}>
                   Connect Microsoft
                 </Button>
               </div>
-              {MICROSOFT_AUTH_ENABLED && !configured ? (
-                <div className="callout callout--warning" style={{ marginTop: 20 }}>
-                  <TriangleAlert />
-                  <div>
-                    Microsoft sign-in needs an Azure client ID and Mojang approval.{' '}
-                    <button type="button" className="link-button" onClick={() => openAuth('microsoft')}>
-                      Microsoft setup <ChevronRight />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               {accounts && !accounts.secureStorageAvailable ? (
                 <div className="callout callout--warning" style={{ marginTop: 12 }}>
                   <ShieldX />
@@ -156,19 +142,13 @@ export function AccountPage() {
                 <div className="account-profile__copy">
                   <div className="account-profile__name-row">
                     <h2>{activeAccount.name}</h2>
-                    {activeAccount.type === 'offline' ? (
-                      <Badge tone="info">Offline</Badge>
-                    ) : activeAccount.sessionExpired ? (
+                    {activeAccount.sessionExpired ? (
                       <Badge tone="danger">Session expired</Badge>
                     ) : (
                       <Badge tone="success">Active</Badge>
                     )}
                   </div>
-                  <span className="account-profile__type">
-                    {activeAccount.type === 'offline'
-                      ? 'Minecraft: Java Edition · Offline profile'
-                      : 'Minecraft: Java Edition · Microsoft'}
-                  </span>
+                  <span className="account-profile__type">Minecraft: Java Edition · Microsoft</span>
                   <div className="account-profile__uuid">
                     <span className="mono">{activeAccount.uuid}</span>
                     <CopyButton value={activeAccount.uuid} label="Copy player UUID" />
@@ -176,13 +156,13 @@ export function AccountPage() {
                 </div>
               </div>
 
-              {activeAccount.sessionExpired && activeAccount.type !== 'offline' ? (
+              {activeAccount.sessionExpired ? (
                 <div className="callout callout--danger">
                   <TriangleAlert />
                   <div>
                     Your saved session can no longer be refreshed. Reconnect your account to continue playing.
                     <div style={{ marginTop: 10 }}>
-                      <Button size="sm" variant="primary" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
+                      <Button size="sm" variant="primary" icon={<KeyRound />} onClick={openAuth}>
                         Reconnect account
                       </Button>
                     </div>
@@ -194,11 +174,7 @@ export function AccountPage() {
                 <div>
                   <span>Session</span>
                   <strong>
-                    {activeAccount.type === 'offline'
-                      ? 'Local profile'
-                      : activeAccount.expiresAt
-                        ? formatDateTime(activeAccount.expiresAt)
-                        : 'Automatic refresh'}
+                    {activeAccount.expiresAt ? formatDateTime(activeAccount.expiresAt) : 'Automatic refresh'}
                   </strong>
                 </div>
                 <div>
@@ -208,19 +184,9 @@ export function AccountPage() {
               </div>
 
               <div className="account-profile__actions">
-                {activeAccount.type !== 'offline' ? (
-                  <Button icon={<RefreshCw />} onClick={() => void handleRefresh()} loading={refreshing}>
-                    Refresh session
-                  </Button>
-                ) : MICROSOFT_AUTH_ENABLED ? (
-                  <Button icon={<UserPlus />} onClick={() => openAuth('microsoft')}>
-                    Connect Microsoft
-                  </Button>
-                ) : (
-                  <Button icon={<UserPlus />} onClick={() => openAuth('offline')}>
-                    Add profile
-                  </Button>
-                )}
+                <Button icon={<RefreshCw />} onClick={() => void handleRefresh()} loading={refreshing}>
+                  Refresh session
+                </Button>
                 <Button variant="ghost" icon={<LogOut />} onClick={() => setSignOutTarget(activeAccount)}>
                   Sign out
                 </Button>
@@ -233,131 +199,53 @@ export function AccountPage() {
               <div className="account-side__head">
                 <ShieldCheck />
                 <div>
-                  <h3>{activeAccount.type === 'offline' ? 'Offline profile' : 'Credential security'}</h3>
-                  <p>
-                    {activeAccount.type === 'offline'
-                      ? 'A local username and UUID stored on this device.'
-                      : 'Signed in through Microsoft, stored by your operating system.'}
-                  </p>
+                  <h3>Credential security</h3>
+                  <p>Signed in through Microsoft, stored by your operating system.</p>
                 </div>
               </div>
-              {activeAccount.type === 'offline' ? (
-                <>
-                  <div className="security-list">
-                    <div>
-                      <span>Authentication</span>
-                      <strong>None (offline)</strong>
-                    </div>
-                    <div>
-                      <span>Online servers</span>
-                      <strong>Rejected by online-mode</strong>
-                    </div>
-                    <div>
-                      <span>Stored data</span>
-                      <strong>Username + UUID</strong>
-                    </div>
-                  </div>
-                  <div className="account-side__note">
-                    <WifiOff />
-                    <span>
-                      Offline mode cannot prove ownership. Use it for singleplayer, LAN, and testing with a username you
-                      own.
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="security-list">
-                    <div>
-                      <span>Storage</span>
-                      <strong>{accounts?.storageLabel || 'Not available'}</strong>
-                    </div>
-                    <div>
-                      <span>OAuth flow</span>
-                      <strong>PKCE + loopback callback</strong>
-                    </div>
-                    <div>
-                      <span>Token type</span>
-                      <strong>Encrypted refresh token</strong>
-                    </div>
-                  </div>
-                  <div className="account-side__note">
-                    <LockKeyhole />
-                    <span>
-                      Aqua never asks for your Microsoft password. Sign-in happens in your system browser on
-                      microsoft.com.
-                    </span>
-                  </div>
-                </>
-              )}
-            </section>
-
-            {MICROSOFT_AUTH_ENABLED ? (
-            <section className="panel panel--pad">
-              <div className="account-side__head">
-                <KeyRound />
+              <div className="security-list">
                 <div>
-                  <h3>Microsoft app ID</h3>
-                  <p>The Azure application used for this launcher’s sign-in.</p>
+                  <span>Storage</span>
+                  <strong>{accounts?.storageLabel || 'Not available'}</strong>
+                </div>
+                <div>
+                  <span>OAuth flow</span>
+                  <strong>PKCE + loopback callback</strong>
+                </div>
+                <div>
+                  <span>Token type</span>
+                  <strong>Encrypted refresh token</strong>
                 </div>
               </div>
-              {configured && settings ? (
-                <>
-                  <div className="copy-field account-app-id">
-                    <span className="copy-field__value">{settings.microsoftClientId}</span>
-                    <CopyButton value={settings.microsoftClientId} label="Copy client ID" />
-                  </div>
-                  <div className="account-side__actions">
-                    <button type="button" className="link-button" onClick={() => navigate('settings')}>
-                      Manage in settings <ChevronRight />
-                    </button>
-                    <button type="button" className="link-button" onClick={() => navigate('settings')}>
-                      Change <ChevronRight />
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="callout callout--warning">
-                  <TriangleAlert />
-                  <div>
-                    No app ID configured. Adding one is required for new sign-ins.
-                    <div style={{ marginTop: 8 }}>
-                      <Button size="sm" variant="primary" onClick={() => openAuth('microsoft')}>
-                        Configure sign-in
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div className="account-side__note">
+                <LockKeyhole />
+                <span>
+                  Aqua never asks for your Microsoft password. Sign-in happens in your system browser on
+                  microsoft.com.
+                </span>
+              </div>
             </section>
-            ) : null}
           </aside>
 
           <section className="panel account-others">
             <div className="panel-head">
               <div>
-                <h2 className="panel-head__title">{MICROSOFT_AUTH_ENABLED ? 'Other accounts' : 'Other profiles'}</h2>
-                <p className="panel-head__subtitle">
-                  {MICROSOFT_AUTH_ENABLED ? 'Switch without typing your password again.' : 'Switch players without restarting the launcher.'}
-                </p>
+                <h2 className="panel-head__title">Other accounts</h2>
+                <p className="panel-head__subtitle">Switch without typing your password again.</p>
               </div>
-              <Button variant="ghost" size="sm" icon={<UserPlus />} onClick={() => openAuth()}>
-                {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
+              <Button variant="ghost" size="sm" icon={<UserPlus />} onClick={openAuth}>
+                Add account
               </Button>
             </div>
             <div className="panel-body">
               {otherAccounts.length === 0 ? (
                 <EmptyState
                   icon={<Users />}
-                  title="Only one profile connected"
-                  description={
-                    MICROSOFT_AUTH_ENABLED
-                      ? 'Add another Microsoft account to switch between Minecraft profiles.'
-                      : 'Add another offline profile to switch between Minecraft players.'
-                  }
+                  title="Only one account connected"
+                  description="Add another Microsoft account to switch between Minecraft profiles."
                 >
-                  <Button size="sm" icon={<UserPlus />} onClick={() => openAuth()}>
-                    {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
+                  <Button size="sm" icon={<UserPlus />} onClick={openAuth}>
+                    Add account
                   </Button>
                 </EmptyState>
               ) : (
@@ -369,11 +257,7 @@ export function AccountPage() {
                         <span className="account-list__name">{account.name}</span>
                         <span className="account-list__uuid mono">{account.uuid}</span>
                       </div>
-                      {account.type === 'offline' ? (
-                        <Badge tone="info">Offline</Badge>
-                      ) : account.sessionExpired ? (
-                        <Badge tone="danger">Expired</Badge>
-                      ) : null}
+                      {account.sessionExpired ? <Badge tone="danger">Expired</Badge> : null}
                       <Button
                         size="sm"
                         onClick={() => void handleSwitch(account)}

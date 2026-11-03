@@ -52,7 +52,6 @@ export function ServersPage() {
   const {
     selectedInstallation,
     installations,
-    activeAccount,
     game,
     launchingId,
     joinServer,
@@ -453,7 +452,6 @@ export function ServersPage() {
             const compatibility = analyzeServerCompatibility({
               server,
               installation: target,
-              accountType: activeAccount?.type ?? null,
               status: status ?? null,
               usedFallback,
             })
@@ -594,8 +592,7 @@ export function ServersPage() {
       <div className="callout callout--info servers-footnote">
         <Info />
         <span>
-          Java servers use the Microsoft account you signed in with. Online-mode servers verify that account; there
-          are no offline profiles in this build.
+          Java servers use the Microsoft account you signed in with. Online-mode servers verify that account.
         </span>
       </div>
 
