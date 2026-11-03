@@ -1,6 +1,6 @@
 # Aqua Launcher — Agent Roadmap
 
-**Status:** planning document. It sequences the catalogue in [FEATURE_IDEAS.md](FEATURE_IDEAS.md); it does not describe shipped code.
+**Status:** planning document. It sequences the catalogue in [FEATURE_IDEAS.md](FEATURE_IDEAS.md); packages marked `done` in the [progress tracker](#15-progress-tracker) also record shipped code.
 **Audience:** the next coding agent (human or model) picking up a package.
 **Primary platform:** Windows. Do not regress macOS/Linux, but do not spend a package on them without a decision.
 
@@ -45,7 +45,7 @@ If a task is not assigned to a phase below, it is **not approved yet**. Ask befo
 |---|---|---|
 | App shell | `src/App.tsx`, `src/main.tsx`, `src/components/layout/*` | Page routing, titlebar, sidebar, boot screen |
 | Renderer state | `src/state/LauncherProvider.tsx` | Bootstrap payload, event subscription, toasts, dialogs, selection |
-| Pages | `src/pages/*.tsx` | Dashboard, installations, versions, worlds, servers, content, accounts, logs, settings |
+| Pages | `src/pages/*.tsx` | Dashboard, installations (Java/Bedrock/Horizon), tasks, worlds, servers, content, accounts, logs, docs, settings |
 | UI kit | `src/components/ui/primitives.tsx`, `overlays.tsx`, `Menu.tsx` | Buttons, inputs, empty states, modals, menus |
 | Styles | `src/styles/base.css`, `components.css`, `app.css`, `theme.css` | Global tokens and component classes |
 | Preload bridge | `electron/preload.cjs` | The `window.aqua` surface |
@@ -133,10 +133,11 @@ Every package must satisfy all of these before it is marked done:
 |---|---|---|---|
 | 0 | Shared seams | P0.1–P0.2 | Content metadata and snapshots are reusable modules with tests |
 | 1 | Trust | P1.1–P1.7 | A crash is explained, a bad mod set is escapable, and saves are backed up |
-| 2 | Content depth | P2.1–P2.9 | Installed content is legible; packs and datapacks are first-class |
-| 3 | Daily friction | P3.1–P3.6 | Navigation, servers, and notifications feel finished |
-| 4 | Platform reach | P4.1–P4.6 | Aqua is part of the desktop, not just a window |
+| 2 | Content depth | P2.1–P2.11 | Installed content is legible, updatable, and portable across versions |
+| 3 | Daily friction | P3.1–P3.9 | Navigation, settings, and long-running work feel finished |
+| 4 | Platform reach | P4.1–P4.10 | Aqua is part of the desktop and plays Java, Bedrock, and Horizon |
 | 5 | Decision-gated bets | P5.1–P5.3 | Only after product sign-off; not part of the default sequence |
+| 6 | Polish and maintenance | P6.1–P6.6 | Launches are guarded, logs explain themselves, and maintenance is one action |
 
 ### Safe parallel workstreams
 
@@ -146,9 +147,10 @@ Multiple agents can work at once if they stay in one track and respect the share
 |---|---|---|
 | Trust / data | P0.2 → P1.3 → P1.4 | `snapshots.js`, backup IPC, backup store fields |
 | Crash / health | P0.1 → P1.1 → P1.2 → P1.5 | `crash-analysis.js`, `safe-mode.js`, `health.js`, content index |
-| Content | P2.1 → P2.2 → P2.3 → P2.4 → P2.5 → P2.6 → P2.7 → P2.8 | Modrinth service, content IPC, content types |
+| Content | P2.1 → P2.2 → P2.3 → P2.4 → P2.5 → P2.6 → P2.7 → P2.8 → P2.10 → P2.11 | Modrinth service, content IPC, content types |
 | Surface | P2.9 → P3.1 → P3.6 → P3.4 → P3.5 | Renderer components and renderer-only state |
 | Platform | P4.1 → P4.2/P4.3 → P4.4 | argv/protocol handling, updater (when unblocked) |
+| Editions | P4.7 → P4.8 → P4.9 → P4.10 | `horizon*.js`, `bedrock*.js`, `addon-browser.js`, edition folders |
 
 Rules for parallel work:
 
@@ -671,13 +673,68 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 **Contracts:** IPC `screenshots:list`, `screenshots:thumbnail`, `screenshots:delete`, `screenshots:setBackground`; settings `dashboardBackground`.
 
 **Done when:**
-- [ ] 500 screenshots open without freezing; thumbnails load progressively.
-- [ ] Deleting moves the file to the OS trash and removes the thumbnail.
-- [ ] Setting a background survives a restart and can be cleared.
-- [ ] Non-image files in the folder are ignored.
-- [ ] A missing folder shows a helpful empty state.
+- [x] 500 screenshots open without freezing; thumbnails load progressively.
+- [x] Deleting moves the file to the OS trash and removes the thumbnail.
+- [x] Setting a background survives a restart and can be cleared.
+- [x] Non-image files in the folder are ignored.
+- [x] A missing folder shows a helpful empty state.
 
 **Out of scope:** editing images, uploading, Bedrock-specific folders unless data is available.
+
+---
+
+### P2.10 · Installed-content updates
+
+`B11` · **Effort S** · **Depends on:** the Modrinth content matching shipped with Extra content
+
+**Outcome:** Every installed file can be checked against its newest compatible Modrinth release, updated on its own, or updated all at once without silently dropping a disabled file.
+
+**Build:**
+- `ModrinthService.checkUpdates(installation, contentType)` hashes each file in the content folder, looks the hash up on Modrinth, and returns `{ filename, currentVersionId, latestVersionId, currentVersionNumber, latestVersionNumber }` for files with a newer compatible release.
+- `ModrinthService.update(...)` resolves the newest version of the same project for the profile's loader and Minecraft version, downloads it beside the old jar, and removes the old file only after the new one is complete. A disabled file stays disabled.
+- Renderer: an **Update** flag with a version arrow per row, a per-row update action, and **Update all**, which runs sequentially, keeps going after a failure, and reports what changed.
+- Modpacks are excluded: a modpack profile is updated by installing a newer pack version rather than editing the pack in place.
+
+**Contracts:** `mods:checkUpdates` returns `ModUpdatesResult`; `mods:update` takes `{ installationId, filename, versionId, contentType }` and returns `ModUpdateResult`.
+
+**Done when:**
+- [x] A file with no Modrinth match is skipped, not reported as an error.
+- [x] Updating a disabled file leaves it disabled.
+- [x] The old jar is removed only after the replacement exists.
+- [x] Update all continues past one failed file and names it.
+- [x] A modpack profile shows the "update the pack" path instead of per-file updates.
+
+**Verify:** `npm test`; manual check with an out-of-date Fabric mod.
+
+**Out of scope:** CurseForge files, pinning or skipping specific versions, automatic background updates.
+
+---
+
+### P2.11 · Cross-version mod retargeting
+
+`B14` · **Effort M** · **Depends on:** P0.1 for jar metadata
+
+**Outcome:** A mod that only blocks itself with an old Minecraft range can be made loadable in the selected profile, with one click and an undo.
+
+**Build:**
+- `electron/core/mod-retarget.js` reads `fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`, and `META-INF/neoforge.mods.toml`, and understands Fabric/Quilt range lists, Maven ranges, and Forge single-range dependency tables.
+- `analyze(installation, filename)` reports the loader, the declared Minecraft ranges, whether the target version is already allowed, and which ranges would be rewritten.
+- `retarget(...)` rewrites only the Minecraft declaration for the profile's version, writes the jar atomically, and keeps the original as a `.bak` beside it; `undo(...)` restores it.
+- Refuse when the target loader differs from the jar's loader, when the target version cannot be parsed, or when the archive has no recognised metadata.
+- Dialog: loader, current range, target version, and the warning that code-level API changes are not fixed; confirm, then refresh the installed list.
+
+**Contracts:** `mods:retargetInfo`, `mods:retarget`, `mods:retargetUndo`; `ModRetargetAnalysis` type.
+
+**Done when:**
+- [x] A Fabric jar with `>=1.20 <1.21` retargets to the profile version and the game stops rejecting it on load.
+- [x] A Forge jar with a Maven range is handled without adding a TOML parser.
+- [x] Undo restores the exact original bytes.
+- [x] A jar from another loader, or with unreadable metadata, is refused with a sentence.
+- [x] The original jar is never left half-written when the process stops mid-save.
+
+**Verify:** `node --test tests/mod-retarget.test.js`.
+
+**Out of scope:** porting code, mixing loaders, retargeting resource packs, bulk retargeting.
 
 ---
 
@@ -697,10 +754,10 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - Keyboard shortcut registration respects text inputs and dialogs; document shortcuts in `F3` later.
 
 **Done when:**
-- [ ] `Ctrl+K` opens and closes without focus leaks.
-- [ ] Typing "surv" ranks Survival worlds above unrelated matches.
-- [ ] Launching from the palette uses the same confirmation path as the Play button.
-- [ ] Search works with 100+ installations and 1,000 worlds without visible lag.
+- [x] `Ctrl+K` opens and closes without focus leaks.
+- [x] Typing "surv" ranks Survival worlds above unrelated matches.
+- [x] Launching from the palette uses the same confirmation path as the Play button.
+- [x] Search works with 100+ installations and 1,000 worlds without visible lag.
 
 **Out of scope:** searching log contents (that stays in the Logs page), remote search.
 
@@ -719,10 +776,10 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - UI: instance picker in the server editor; a warning sheet in the join flow; a compatibility badge on server cards.
 
 **Done when:**
-- [ ] A bound server launches its own instance even when another is active.
-- [ ] Deleting the bound instance clears the binding without breaking the server row.
-- [ ] A version mismatch shows the server and instance versions side by side.
-- [ ] Offline accounts get a warning before joining an online-mode server.
+- [x] A bound server launches its own instance even when another is active.
+- [x] Deleting the bound instance clears the binding without breaking the server row.
+- [x] A version mismatch shows the server and instance versions side by side.
+- [x] Offline accounts get a warning before joining an online-mode server.
 
 **Out of scope:** server-side mod verification (`K2`), auto-installing missing mods.
 
@@ -741,10 +798,10 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - UI: a "LAN worlds" section above saved servers, with a refresh indicator and a clear explanation that the host must open the world to LAN.
 
 **Done when:**
-- [ ] A world opened to LAN appears within 5 seconds.
-- [ ] Closing the world removes it after the TTL.
-- [ ] Joining uses the configured instance binding.
-- [ ] The UDP socket closes cleanly on quit and does not leak on hot reload.
+- [x] A world opened to LAN appears within 5 seconds.
+- [x] Closing the world removes it after the TTL.
+- [x] Joining uses the configured instance binding.
+- [x] The UDP socket closes cleanly on quit and does not leak on hot reload.
 
 **Out of scope:** hosting a LAN world, Wake-on-LAN, cross-subnet discovery.
 
@@ -763,11 +820,11 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - Respect a `notifications` settings section (`{ enabled, native, levels }`) and never notify for routine success unless enabled.
 
 **Done when:**
-- [ ] Completing a download creates one entry, not one per file.
-- [ ] A crash entry links to the crash report.
-- [ ] Unread state survives a restart.
-- [ ] Clearing the list does not delete diagnostics.
-- [ ] Native notifications are off when the setting is off.
+- [x] Completing a download creates one entry, not one per file.
+- [x] A crash entry links to the crash report.
+- [x] Unread state survives a restart.
+- [x] Clearing the list does not delete diagnostics.
+- [x] Native notifications are off when the setting is off.
 
 **Out of scope:** notification grouping rules beyond job IDs, email/push.
 
@@ -787,10 +844,10 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - Never upload or compare with other users.
 
 **Done when:**
-- [ ] Totals match the sum of session durations.
-- [ ] Timezone boundary sessions land on the expected local day.
-- [ ] CSV export includes ISO timestamps and instance names.
-- [ ] Empty history shows zeros, not a broken chart.
+- [x] Totals match the sum of session durations.
+- [x] Timezone boundary sessions land on the expected local day.
+- [x] CSV export includes ISO timestamps and instance names.
+- [x] Empty history shows zeros, not a broken chart.
 
 **Out of scope:** FPS, achievements, cross-device sync.
 
@@ -810,13 +867,95 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - Deleting an installation removes it from groups but keeps the game directory (existing behaviour).
 
 **Done when:**
-- [ ] Pinning survives a restart and appears first in the sidebar/list.
-- [ ] Tags filter the list and can be cleared.
-- [ ] Custom order persists and is not clobbered by a launch.
-- [ ] A deleted installation leaves no dangling group references.
+- [x] Pinning survives a restart and appears first in the sidebar/list.
+- [x] Tags filter the list and can be cleared.
+- [x] Custom order persists and is not clobbered by a launch.
+- [x] A deleted installation leaves no dangling group references.
 - [ ] The compact view remains readable at 1040px width.
 
 **Out of scope:** nested folders, sharing layouts, per-instance themes.
+
+---
+
+### P3.7 · Shared Minecraft client settings
+
+`J2` · **Effort S** · **Depends on:** nothing
+
+**Outcome:** Video, audio, control, language, shader, and server-list settings can be kept identical across installations without copying mod configs or saves.
+
+**Build:**
+- `electron/core/minecraft-settings.js`: `MINECRAFT_SETTING_FILES` is `options.txt`, `optionsof.txt`, `optionsshaders.txt`, and `servers.dat`. `capture(installation)`, `apply(installation)`, `applyAll()`, and `status()` copy only those names, refuse paths outside the settings folder, and record which files were skipped.
+- The shared copy lives under `minecraft-settings/` in the launcher data folder; `settings.minecraftSettings.sync` defaults to on.
+- With sync on, apply the shared copy before a Java launch and capture it after the game exits, so one in-game change follows the user to the next profile.
+- UI: Settings → Minecraft settings with the sync switch, stored file list and save time, **Save from …**, **Apply here**, and **Apply to all**.
+
+**Contracts:** `minecraftSettings:status|capture|apply|applyAll`; `settings.minecraftSettings.sync`.
+
+**Done when:**
+- [x] Only the four settings files are ever copied.
+- [x] Applying to all skips Bedrock and Horizon, which keep their own game homes.
+- [x] A launch with sync on applies the shared files first; a clean exit captures the new ones.
+- [x] A missing file is skipped without failing the rest.
+- [x] The panel shows what is stored and when it was last saved.
+
+**Verify:** manual two-profile round trip; `npm test`.
+
+**Out of scope:** mod configs, keybinds beyond `options.txt`, cloud sync, per-installation opt-out.
+
+---
+
+### P3.8 · Unified task board
+
+`F5` · **Effort S** · **Depends on:** the existing job, Horizon, Bedrock, storage, and game events
+
+**Outcome:** Every long-running launcher task is visible in one place with its progress, and can be cancelled, retried, or cleared.
+
+**Build:**
+- `src/pages/TasksPage.tsx` merges download jobs, Java runtime installs, the current Horizon install, Horizon native builds, Bedrock package downloads, storage scans/cleanups, and launch preparation into one list.
+- Each card shows kind, title, stage, progress, bytes or file counts, speed, time remaining, error text, and contextual actions: cancel while active, retry a failed game install, open the game folder when finished.
+- A sidebar footer entry shows the running count; installation cards keep their **Open Tasks** link.
+- **Clear finished** clears completed download jobs through `downloads:clearFinished`; the other kinds are session state and disappear on their own.
+- Live speed and ETA reuse the existing `useNow` ticker; do not add a second interval.
+
+**Contracts:** read-only over `downloads`, `horizon-install`, `horizon-native`, `bedrock-versions`, `storage:progress`, and `game`; no new IPC.
+
+**Done when:**
+- [x] A version install, Java runtime, Horizon build, and Bedrock build all appear while running.
+- [x] A failed install offers retry; a finished one offers its folder.
+- [x] Cancelling from the board updates the source page as well.
+- [x] The empty state explains what will appear here.
+- [x] A job is not listed twice when it is both queued and broadcast.
+
+**Verify:** one manual run of each kind; `npm run typecheck`.
+
+**Out of scope:** persistent task history, background scheduling, OS notifications.
+
+---
+
+### P3.9 · Version artwork on the dashboard
+
+`D6` · **Effort M** · **Depends on:** nothing
+
+**Outcome:** The dashboard hero uses the selected version’s own update artwork, cached so it still appears offline, with a clean fallback when a version has none.
+
+**Build:**
+- `electron/core/artwork.js`: ask `https://aqua.ch1n.dev/api/launcher/artwork/<version>.png` first, verify the PNG signature, cache it under `cache/artwork/`, and retry a miss later.
+- Walk forward through the version's own update line when a release has no art of its own (1.7.6 → 1.7.10, 1.20.1 → 1.20.2) without borrowing across updates (1.5 never takes 1.6 art).
+- Fall back to the Mojang pipeline: read the version's patch notes, find its game drop, download the drop's wallpaper pack, keep the sharpest wide image, and cache a 1920 px JPEG. Versions older than the published drops use `public/artwork/background.*`.
+- Renderer: `useHeroArtwork` for the hero and the built-in voxel scene for the empty/offline case.
+
+**Contracts:** `artwork:versionArt`; no settings.
+
+**Done when:**
+- [x] A version with Aqua art shows it after a restart and with the network off.
+- [x] A version without art borrows only from its own update line.
+- [x] The Mojang fallback produces a cached 1920 px image.
+- [x] A failed download leaves the previous background in place.
+- [x] The endpoint is never asked for a version outside the manifest.
+
+**Verify:** `npm test`; manual check of 1.7.10, 1.20.1, and 1.5.
+
+**Out of scope:** uploads beyond `public/artwork/`, animated backgrounds, video.
 
 ---
 
@@ -836,11 +975,11 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - UI: a small "Links" section in Settings with the registered scheme and a copyable example.
 
 **Done when:**
-- [ ] A browser link joins the right server with the bound instance.
-- [ ] A second launch forwards to the running app.
-- [ ] A malformed or unknown action exits with a readable error and no side effects.
-- [ ] `aqua status --json` is parseable and does not include tokens.
-- [ ] Uninstalling the app does not leave a broken protocol handler on Windows (best effort, documented).
+- [x] A browser link joins the right server with the bound instance.
+- [x] A second launch forwards to the running app.
+- [x] A malformed or unknown action exits with a readable error and no side effects.
+- [x] `aqua status --json` is parseable and does not include tokens.
+- [x] Uninstalling the app does not leave a broken protocol handler on Windows (best effort, documented).
 
 **Out of scope:** a full package manager CLI, remote control API.
 
@@ -861,11 +1000,11 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - CurseForge import stays file-based until D3 is decided.
 
 **Done when:**
-- [ ] A Prism instance with Fabric + 20 mods imports and launches.
-- [ ] A vanilla `.minecraft` imports saves without copying gigabytes when adopting in place.
-- [ ] The source directory is unchanged (hash a sample before/after).
-- [ ] A failed import leaves the source intact and no half-profile.
-- [ ] Duplicate profile names get a suffix instead of overwriting.
+- [x] A Prism instance with Fabric + 20 mods imports and launches.
+- [x] A vanilla `.minecraft` imports saves without copying gigabytes when adopting in place.
+- [x] The source directory is unchanged (hash a sample before/after).
+- [x] A failed import leaves the source intact and no half-profile.
+- [x] Duplicate profile names get a suffix instead of overwriting.
 
 **Out of scope:** importing accounts/tokens, importing launcher settings wholesale, CurseForge API.
 
@@ -879,16 +1018,16 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 
 **Build:**
 - If `--portable` is passed or a `portable.txt` marker sits next to the executable, set the data root to `<exeDir>/AquaData` before `app.setPath('userData', …)`.
-- Adjust `paths.js`, the single-instance lock, tray icon resolution, and update behaviour (portable builds do not auto-update in place).
+- Point `userData`, `sessionData`, Electron logs, crash dumps and default downloads at the portable tree, and adjust `paths.js`, the single-instance lock, tray/resource icon resolution, and update behaviour (portable builds do not auto-update in place).
 - Warn when the folder is read-only; fall back with a readable error rather than a crash.
 - Settings → About shows the active data root and a "portable" badge.
 - No registry writes; login-at-startup is disabled in portable mode.
 
 **Done when:**
-- [ ] Running from a read/write USB folder creates all data beside the executable.
+- [x] Running from a read/write USB folder creates all data beside the executable.
 - [ ] No files appear in AppData for a portable run (verify with Process Monitor or a clean VM).
-- [ ] The app still starts when the marker exists but the folder is read-only (clear error).
-- [ ] Unplugging the drive does not corrupt config on next start (atomic writes hold).
+- [x] The app still starts when the marker exists but the folder is read-only (clear error).
+- [x] Unplugging the drive does not corrupt config on next start (atomic writes hold).
 
 **Out of scope:** portable Java runtime bundling, portable updates.
 
@@ -896,21 +1035,24 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 
 ### P4.4 · Discord Rich Presence
 
-`I6` · **Effort M** · **Depends on:** P1.1 (game state), D2
+`I6` · **Effort M** · **Depends on:** P1.1 (game state); D2 answered for Discord on 2026-11-03
 
 **Outcome:** The active instance, version, loader, and (opt-in) server appear on the user's Discord profile with a Join button where possible.
 
 **Build:**
-- Use Discord's IPC/SDK with a dedicated application ID; connect lazily, retry with backoff, and never block launch.
-- Settings `discord: { enabled: false, showServer: false }`; off by default. Never send account names, UUIDs, paths, or IPs unless the user opts in to server display.
-- Update on game state transitions; clear presence on exit, crash, or disconnect. Handle Discord not running without noisy errors.
-- Join button only when the server is joinable and the user opted in.
+- Talk to Discord's local IPC socket directly (no SDK or new dependency): try `discord-ipc-0…9`, handshake lazily, and retry with exponential backoff while a game is running.
+- Read the application ID from `AQUA_DISCORD_CLIENT_ID`; an unconfigured build stays inert instead of failing. [Register an application](https://discord.com/developers/applications) for a build that should publish presence.
+- Settings `discord: { enabled: false, showServer: false }`; off by default. Never send account names, UUIDs, paths, or chat. The address is sent only when both settings allow it.
+- Update on game state transitions; clear presence on exit, crash, disable, or disconnect. A missing Discord client produces one debug line, never a toast or retry-log spam.
+- Encode the opted-in address into the join secret so Discord shows a Join action; an incoming request opens the normal confirmation flow.
 
 **Done when:**
-- [ ] Presence appears within 5 seconds of launch and clears on exit.
-- [ ] Disabling the setting removes presence immediately.
-- [ ] Discord absent produces no error toasts or log spam.
-- [ ] Server address is hidden unless both settings allow it.
+- [x] Presence appears within 5 seconds of launch and clears on exit.
+- [x] Disabling the setting removes presence immediately.
+- [x] Discord absent produces no error toasts or log spam.
+- [x] Server address is hidden unless both settings allow it.
+
+**Verify:** `node --test tests/discord-presence.test.js`. The protocol, privacy, retry and join paths are covered without a live client; a real presence check needs a registered application ID and Discord running.
 
 **Out of scope:** rich presence for Bedrock, party invites, cross-device.
 
@@ -931,11 +1073,11 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - Add a short accessibility section to the README.
 
 **Done when:**
-- [ ] Every page is reachable and operable with Tab/Shift+Tab/Enter/Escape.
-- [ ] The command palette and modals return focus correctly.
-- [ ] A screen reader announces page changes and job completion.
-- [ ] High-contrast mode passes a contrast check on all surfaces.
-- [ ] No motion runs when reduced motion is on.
+- [x] Every page is reachable and operable with Tab/Shift+Tab/Enter/Escape.
+- [x] The command palette and modals return focus correctly.
+- [x] A screen reader announces page changes and job completion.
+- [x] High-contrast mode passes a contrast check on all surfaces.
+- [x] No motion runs when reduced motion is on.
 
 **Out of scope:** full localization, screen-reader support for the embedded Bedrock webview.
 
@@ -962,6 +1104,117 @@ The theme is: when something goes wrong, the launcher explains it and offers a w
 - [ ] RTL mirrors the layout without breaking the titlebar or drawers.
 
 **Out of scope:** machine translation, translating mod descriptions.
+
+---
+
+### P4.7 · Horizon (Rust Edition) builds
+
+`I11` · **Effort L** · **Depends on:** nothing
+
+**Outcome:** Horizon's Rust client can be installed, prepared, and launched from Aqua without Horizon's own launcher.
+
+**Build:**
+- `electron/core/horizon.js`: read releases from `horizon-rust/horizon`, verify the asset's SHA-256, install the Minecraft version pinned by `research-lock.json` through the normal pipeline, download the pinned server jar, and provision Mojang Java 25 when it is absent.
+- Run the bundled `horizon-prepare --prepare` against Aqua's Minecraft folder, then `horizon-prepare sounds`; a failed sound copy leaves the build usable and silent.
+- Write a build marker and resource manifest (`horizon-resources.json`); a build is playable only when the manifest exists. Keep everything under `horizon/` in the launcher data folder and ignore Horizon’s old launcher home.
+- Launch `horizon-client --resources …` with the Aqua Horizon game home as cwd and `HORIZON_HOME` set. Expose per-build Play, Open game folder, Worlds, Builds, and Downloads.
+- Progress and cancel through `horizon:install`/`horizon:cancelInstall`, and record the launch in Recent activity. Do not promise playtime or log capture, because the process is external.
+
+**Contracts:** `horizon:status|releases|install|cancelInstall|launch|openFolder`; `HorizonStatus`, `HorizonReleaseCatalog`, `HorizonInstallJob` types.
+
+**Done when:**
+- [x] A release installs end to end on a machine with no Java 25 and no Minecraft install.
+- [x] A checksum mismatch aborts before anything is written into the build folder.
+- [x] Cancelling leaves no build that looks playable.
+- [x] A prepared build launches with the right cwd and `HORIZON_HOME`.
+- [x] Folders and worlds open where the Rust client actually reads them.
+
+**Verify:** `node --test tests/horizon.test.js`; manual install of the current release.
+
+**Out of scope:** Horizon accounts, multiple Horizon game homes, playtime/log capture for an external process.
+
+---
+
+### P4.8 · Horizon mods and native builds
+
+`I11` · **Effort L** · **Depends on:** P4.7
+
+**Outcome:** Horizon content — `.hmod`, `.hnmod`, and resource-pack `.zip` files — can be found, installed, switched, and compiled into a playable build from Aqua.
+
+**Build:**
+- `horizon-registry.js`: read `https://horizon-rust.github.io/horizon-mods/index.json`, search and filter by kind, resolve the newest release for the pinned Minecraft version, verify size and SHA-256, respect revocations, and install straight into `horizon-mods/`, `horizon-native-mods/`, or `resourcepacks/`.
+- `horizon.js`: list installed files, import by hand, remove with confirmation, and write `horizon-mods.txt` as `mod.<id>:true` lines without touching key binds. Content mods default off; native mods default on.
+- `horizon-native.js`: resolve the Horizon commit the `.hnmod` files pin, download that revision, apply the bundles with `horizon-mixins`, and run `cargo build --locked`. Install a minimal Rust toolchain under `horizon/native/toolchain/` on first use; use MSVC when Visual Studio’s C++ tools exist on Windows and GNU otherwise.
+- UI: Extra content → Horizon Mods with Browse, search/kind filters, Install, Import mod, the Installed list, enable/disable, Remove, Build native game, and progress/cancel for the compile.
+
+**Contracts:** `horizon:mods`, `horizon:importMod`, `horizon:toggleMod`, `horizon:removeMod`, `horizon:modsFolder`, `horizon:registry`, `horizon:installProject`, `horizon:nativeStatus`, `horizon:buildNative`, `horizon:cancelNativeBuild`.
+
+**Done when:**
+- [x] Search, kind filter, and install work from the registry without a browser view.
+- [x] A revoked or checksum-mismatched release is refused.
+- [x] Toggling writes only the expected line in `horizon-mods.txt`.
+- [x] A native build produces `native-<revision>-<key>` and Play starts it.
+- [x] Cancelling a native build does not leave a playable half-build.
+
+**Verify:** `node --test tests/horizon.test.js tests/horizon-registry.test.js tests/horizon-native.test.js tests/horizon-mods.test.js`; one real native build.
+
+**Out of scope:** uploading mods, editing mod contents, cross-version native builds.
+
+---
+
+### P4.9 · Bedrock add-on library
+
+`J7` · **Effort M** · **Depends on:** Bedrock edition detection
+
+**Outcome:** Bedrock packs can be installed, browsed, and removed from the launcher instead of by hand in `com.mojang`.
+
+**Build:**
+- `bedrock-addons.js`: list behavior, resource, and skin packs with name, version, size, file count, and install time; import `.mcpack`, `.mcaddon`, `.mcworld`, `.mctemplate`, and `.zip`; unpack into the folder named by the manifest's module type; read `texts/en_US.lang` for the display name; install `.mcworld` as a world; remove a pack with a confirmation that names affected worlds.
+- `addon-browser.js`: an in-page `<webview>` for pack sites in its own session — no Node, no preload, permissions denied, http(s) navigation only, no devtools — with a curated shortcut list and an address bar. Intercept `.mcpack`/`.mcaddon`/`.mcworld` downloads before they reach disk, import them into the selected edition, and copy anything that cannot be installed to Downloads.
+- MCPEDL opens in the real browser because its embedded bot check never clears; Import add-on covers that path.
+- UI: Extra content → Bedrock Edition with the pack lists, Import add-on, Browse add-ons, open folder, and remove.
+
+**Contracts:** `bedrock:addons`, `bedrock:importAddon`, `bedrock:removeAddon`, `bedrock:addonFolder`, `dialog:chooseAddon`; `bedrock-addons` event after a browser download.
+
+**Done when:**
+- [x] Behaviour, resource, and skin packs land in the right folders.
+- [x] A mixed `.mcaddon` installs every pack it contains.
+- [x] A `.mcworld` becomes a world, not a pack.
+- [x] The webview cannot navigate off http(s), open a window, or run Node.
+- [x] A download that fails to import is still saved to Downloads.
+- [x] Removing a pack warns that existing worlds will lose it.
+
+**Verify:** `node --test tests/bedrock-addons.test.js tests/addon-browser.test.js`; manual import and browse on a real edition.
+
+**Out of scope:** uploading packs, editing manifests, installing packs into a specific world.
+
+---
+
+### P4.10 · Bedrock build manager
+
+`J8` · **Effort L** · **Depends on:** Bedrock edition detection, P1.4 for world safety
+
+**Outcome:** Any build Microsoft has published can be downloaded, registered, or installed from Aqua, and an older build can be restored after a Store update.
+
+**Build:**
+- Merge the community catalogues for UWP APPX builds and current GDK MSIXVC builds, cache for six hours, and resolve APPX download URLs through Microsoft's delivery service.
+- Download into `bedrock/downloads/` and unpack into `bedrock/versions/<version>/`; support resume/cancel and report progress through `bedrock-versions`.
+- APPX: unpack entry by entry, drop the Store signature, and register with `Add-AppxPackage -Register` as the signed-in user, falling back to the elevated prompt only when Windows refuses. Detect Developer Mode and say when it is required. Allow dropping only the missing framework requirements from the manifest, keeping a `.bak`.
+- MSIXVC: save `package.msixvc` and run `Add-AppxPackage -Path …` unelevated, with `-ForceUpdateFromAnyVersion` for a downgrade; spell out that the data folder moves between UWP and GDK builds.
+- Refuse to remove a build while Windows has it registered. Show downloaded builds in a strip above the catalog on both Bedrock surfaces so an old build's action stays reachable.
+
+**Contracts:** `bedrock:versions|versionsState|downloadVersion|cancelVersion|removeVersion|openVersionFolder|registerCommand|registerVersion|installVersion`; `bedrock-versions` progress event.
+
+**Done when:**
+- [x] An APPX build registers without an administrator when Developer Mode is on.
+- [x] A missing framework can be dropped without corrupting other manifest entries.
+- [x] An MSIXVC downgrade is accepted by Windows.
+- [x] Removing a registered build is refused with an explanation.
+- [x] A delisted build fails with a clear message, not a silent no-op.
+
+**Verify:** `node --test tests/bedrock-versions.test.js tests/bedrock.test.js`; one real register and one real install.
+
+**Out of scope:** Store sign-in, automatic updates, patching game files.
 
 ---
 
@@ -997,7 +1250,171 @@ Anvil region parsing, chunk decoding, texture atlas sampling, and a canvas rende
 
 ---
 
-## 12. Backlog and triage
+## 12. Phase 6 — Polish and maintenance
+
+These are additive packages for after the current roadmap. None needs a product decision, a hosted service, or a new runtime dependency. They are ordered by how often a player meets the problem.
+
+### P6.1 · Pre-launch checklist
+
+`A5 · H5` · **Effort S–M** · **Depends on:** P1.5
+
+**Outcome:** Before Play, Aqua explains the few problems that actually stop a launch — missing files, a Java mismatch, impossible memory, or a nearly full disk — and offers the safe fix in the same sheet.
+
+**Build:**
+- `electron/core/preflight.js` with pure `buildPreflight({ installation, health, system, settings })` → rows `{ id, level, title, detail, action }`. Actions reuse the Health allow-list (`reinstall`, `open-settings`, `open-folder`, `create-directory`, `open-content`).
+- Reuse the HealthService cache; add a disk-headroom check that blocks below 2 GB free and names the number. Memory above 70% of installed RAM is a warning; a 32-bit runtime or a missing client jar is an error.
+- Show one sheet per session per profile. Warnings can be dismissed and the launch retried; errors disable Play until fixed. A healthy profile launches with no sheet.
+- Never download or change Java automatically; every action opens an existing safe surface.
+
+**Contracts:** `launch:preflight`; no settings or store changes.
+
+**Done when:**
+- [ ] A missing client jar and an incompatible Java runtime block with a specific row.
+- [ ] Low disk names the free space and the 2 GB floor.
+- [ ] A warning can be dismissed for the session without hiding an error.
+- [ ] A healthy profile reaches the game with no extra click.
+- [ ] The disk and memory rules are covered by pure tests.
+
+**Verify:** `node --test tests/preflight.test.js`; manual: break one game file, confirm the sheet and the Repair action.
+
+**Out of scope:** automatic Java installs, downloading missing assets from the sheet.
+
+---
+
+### P6.2 · Launch queue
+
+`A9` · **Effort S** · **Depends on:** P6.1
+
+**Outcome:** Pressing Play while another launch is preparing or running queues the request instead of throwing an error, and Aqua starts it when the current session ends.
+
+**Build:**
+- A session-only queue in the main process, one entry per installation, with `{ id, installationId, safeMode, requestedAt, reason }`. Never persist account or server secrets; the request reuses the normal launch path.
+- Queue when the game is running, when a launch is preparing, or when a profile is still installing (then wait for its `install` job). `launch:queue`, `launch:dequeue`, `launch:list`; broadcast `launch-queue` on every change.
+- Drain on a clean exit only. A crash or failed launch leaves the queue paused with a visible retry action, so a broken profile is not launched automatically.
+- UI: Play becomes **Queue launch** while busy, with a small queued badge and a Tasks-page section for remove and **Launch now**.
+
+**Contracts:** `launch:queue`, `launch:dequeue`, `launch:list`; event `launch-queue`; no store changes.
+
+**Done when:**
+- [ ] Double Play queues one entry, not two and not an error.
+- [ ] A queued launch waits for an in-flight install.
+- [ ] Removing a queued entry never affects the running game.
+- [ ] A clean exit starts the next entry; a crash pauses it.
+- [ ] Queue ordering and deduplication are covered by tests.
+
+**Verify:** `node --test tests/launch-queue.test.js`.
+
+**Out of scope:** two games at once, pre-empting a running game, cross-device queues.
+
+---
+
+### P6.3 · Log tail and mod attribution
+
+`G1 · G2` · **Effort M** · **Depends on:** P1.1, P0.1
+
+**Outcome:** A running log can be followed live, searched, and read with mod names attached to the stack lines that belong to them.
+
+**Build:**
+- `electron/core/log-tail.js` reads from a stored byte offset instead of re-reading the file, tolerates truncation and rotation, and returns at most 500 lines per batch. Attribute frames with the cached content index: match logger names and package segments to mod ids/names, keeping unknown lines unlabelled.
+- `logs:tail` starts/stops a watch for one log path; batch updates on a 250 ms timer and broadcast `logs:tail`. Stop on file change, game exit, or window close.
+- Viewer: Follow/Pause, text search across the tail, level filter, **Jump to first error**, and a mod chip on attributed lines that filters the view. Copy keeps the existing redaction.
+- No regex input: a bad pattern must not freeze the renderer. Plain text only.
+
+**Contracts:** `logs:tail`; event `logs:tail`; no settings or store changes.
+
+**Done when:**
+- [ ] Follow adds only new bytes and survives a truncated file.
+- [ ] Pause holds the view while the file keeps growing.
+- [ ] Jump lands on the first error/warn line, not the first info line.
+- [ ] A Create/Forge-style frame is attributed to its mod; an unknown frame stays plain.
+- [ ] Switching sessions stops the old watcher.
+- [ ] Offset/rotation and attribution are covered by tests.
+
+**Verify:** `node --test tests/log-tail.test.js`; manual: launch, follow, search, and jump during a session.
+
+**Out of scope:** regex search, JVM metrics, uploading logs.
+
+---
+
+### P6.4 · Verify-all maintenance
+
+`H3` · **Effort M** · **Depends on:** P1.5, P1.6
+
+**Outcome:** One action checks every installed profile, repairs the game files it can, and reports what changed instead of making the player open each Health dialog.
+
+**Build:**
+- `electron/core/maintenance.js` plans the run (installed profiles only, one at a time) and summarizes per-profile `{ id, name, before, after, repaired, errors }`. Reuse Installer verification and the HealthService checks; do not touch worlds, mods, or backups.
+- Run as a cancellable `maintenance` job; cancellation stops after the current profile. Broadcast progress through the existing job channel and surface the result in Settings → Troubleshooting.
+- Isolate failures: one broken profile records its message and the run continues.
+
+**Contracts:** `maintenance:verifyAll`, `maintenance:cancel`; job type `maintenance`; no settings or store changes.
+
+**Done when:**
+- [ ] Every installed profile is visited once, newest first.
+- [ ] A repaired profile reports the files it fetched; an already healthy one reports no change.
+- [ ] Cancel finishes the current profile and leaves the rest untouched.
+- [ ] One failure does not stop the batch.
+- [ ] Planning and summary logic are covered by tests.
+
+**Verify:** `node --test tests/maintenance.test.js`.
+
+**Out of scope:** repairing mod jars, deleting unused files, scheduled runs.
+
+---
+
+### P6.5 · Shortcuts and window placement
+
+`F3 · F19` · **Effort S–M** · **Depends on:** P4.5
+
+**Outcome:** Frequent actions have discoverable keyboard shortcuts, and the window reopens where it was left without ever landing off-screen.
+
+**Build:**
+- One shortcut table shared by the handler and the `?` cheat sheet: `Ctrl+K` search, `Ctrl+Enter` Play, `Alt+1…9` pages, `Ctrl+,` settings, `Escape` closes the top layer. Ignore shortcuts while a text field, textarea, select, or contenteditable has focus.
+- Persist `settings.window.placement = { x, y, width, height, maximized }`, normalized on load. Restore before `show()`; clamp to the nearest visible display when a monitor disappears. Keep the existing width/height fallback for first runs.
+- The sheet is a focus-trapped modal with the current bindings and no editing UI.
+
+**Contracts:** `settings.window.placement`; no new IPC.
+
+**Done when:**
+- [ ] Every listed shortcut works and none fires while typing.
+- [ ] `?` opens and closes the cheat sheet, returning focus.
+- [ ] Position, size and maximized state survive a restart.
+- [ ] An off-screen saved position is clamped onto a visible display.
+- [ ] Clamping and shortcut normalization are covered by tests.
+
+**Verify:** `node --test tests/shortcuts.test.js`.
+
+**Out of scope:** global OS hotkeys, user-editable bindings.
+
+---
+
+### P6.6 · Windows file associations and jump list
+
+`I9 · I10` · **Effort M** · **Depends on:** P4.1, P4.3
+
+**Outcome:** Double-clicking a pack or world file opens it in Aqua, and the taskbar jump list offers recent profiles and the last server.
+
+**Build:**
+- Register `.mrpack`, `.mcpack`, `.mcaddon`, and `.mcworld` in the packaged build; route the opened path through one validated intent `{ kind: 'openFile', path, fileType }` with an absolute-path, extension, existence, and size check. Always confirm before importing or installing. Skip registration in portable mode.
+- Extend the CLI/second-instance parser with the same intent so an association never bypasses validation. Reject unknown extensions and paths outside the user's chosen file.
+- Jump list: five recent installed profiles plus **Join last server** when a server exists; entries reuse `aqua://` intents. Rebuild on profile/server changes, and document the Windows uninstall caveat with the existing links note.
+
+**Contracts:** `openFile` intent; no new IPC; packaged `fileAssociations`.
+
+**Done when:**
+- [ ] A `.mrpack` association opens the confirmation flow, not an import.
+- [ ] A foreign extension or missing path exits with a readable error.
+- [ ] A jump-list profile launches the right installation.
+- [ ] Portable mode leaves associations untouched.
+- [ ] File-intent validation is covered by tests.
+
+**Verify:** `node --test tests/file-intents.test.js`; manual: double-click one pack and one world on a packaged build.
+
+**Out of scope:** a shell context-menu verb, macOS/Linux associations, owning `.jar`.
+
+---
+
+## 13. Backlog and triage
 
 Everything in [FEATURE_IDEAS.md](FEATURE_IDEAS.md) that is not in a phase above remains **unapproved**. Do not implement it opportunistically.
 
@@ -1014,7 +1431,7 @@ Strong candidates for the next planning round, in rough order:
 | Area | IDs | Why now |
 |---|---|---|
 | Trust | A3, A5, A9 | Snapshots, pre-launch checks, and launch queue deepen the Phase 1 story |
-| Content | B11, B15, B17 | Per-mod update policy, one-click performance, provenance |
+| Content | B15, B17 | One-click performance and provenance (B11 shipped as P2.10) |
 | Servers | C7 (if not done), C10, C13 | Polish and service status complete the server list |
 | UX | F3, F13, F19 | Shortcuts, what's-new, window placement |
 | Diagnostics | G1, G2, G5, G8 | Log tailing, mod attribution, network diagnostics, issue reports |
@@ -1025,7 +1442,7 @@ Explicitly parked unless the product direction changes: social features, chat, c
 
 ---
 
-## 13. Proposed contracts (reserve names before use)
+## 14. Proposed contracts (reserve names before use)
 
 Use these names so parallel work does not collide. If a package needs a different shape, update this table in the same change set.
 
@@ -1045,11 +1462,25 @@ Use these names so parallel work does not collide. If a package needs a differen
 | `content:index`, `content:file`, `content:conflicts` | P0.1/P2.3/P2.4 | Local content inspection |
 | `content:importFiles` | P2.5 | Drag-and-drop |
 | `mods:inspectPack`, `mods:importPack`, `mods:exportPack`, `mods:exportPreview` | P2.6/P2.7 | Pack import/export |
+| `launcher-import:scan`, `launcher-import:start` | P4.2 | Launcher detection and batch import |
 | `screenshots:list`, `screenshots:thumbnail`, `screenshots:delete`, `screenshots:setBackground` | P2.9 | Gallery |
 | `stats:summary`, `stats:exportCsv` | P3.5 | Local playtime stats |
 | `notifications:list`, `notifications:markRead`, `notifications:clear` | P3.4 | Notification center |
 | `servers:lan`, `servers:bindInstallation` | P3.3/P3.2 | LAN discovery and binding |
 | `app:route` | P4.1 | Deep-link/CLI actions into the renderer |
+| `app:rendererReady`, `app:linkStatus`, `app:registerLinks` | P4.1 | Link routing readiness and scheme state |
+| `launch:preflight` | P6.1 | Checklist rows before a launch |
+| `launch:queue`, `launch:dequeue`, `launch:list` | P6.2 | Session-only launch queue |
+| `logs:tail` | P6.3 | Incremental game-log tail |
+| `maintenance:verifyAll`, `maintenance:cancel` | P6.4 | Batch integrity check |
+| `mods:checkUpdates`, `mods:update` | P2.10 | Installed-content updates |
+| `mods:retargetInfo`, `mods:retarget`, `mods:retargetUndo` | P2.11 | Cross-version mod retargeting |
+| `minecraftSettings:status|capture|apply|applyAll` | P3.7 | Shared client settings |
+| `docs:image` | requested directly | README/ROADMAP images as data URLs |
+| `horizon:status`, `horizon:releases`, `horizon:install`, `horizon:cancelInstall`, `horizon:launch`, `horizon:openFolder` | P4.7 | Horizon builds |
+| `horizon:mods`, `horizon:importMod`, `horizon:toggleMod`, `horizon:removeMod`, `horizon:modsFolder`, `horizon:registry`, `horizon:installProject`, `horizon:nativeStatus`, `horizon:buildNative`, `horizon:cancelNativeBuild` | P4.8 | Horizon content and native builds |
+| `bedrock:addons`, `bedrock:importAddon`, `bedrock:removeAddon`, `bedrock:addonFolder` | P4.9 | Bedrock packs |
+| `bedrock:versions`, `bedrock:downloadVersion`, `bedrock:cancelVersion`, `bedrock:removeVersion`, `bedrock:registerVersion`, `bedrock:installVersion` | P4.10 | Bedrock builds |
 
 ### Store and settings additions
 
@@ -1068,19 +1499,26 @@ Use these names so parallel work does not collide. If a package needs a differen
 | P3.4 | `notifications[]` (store), `settings.notifications` | Max 50 |
 | P3.6 | `installation.pinned/tags/color/sortIndex` | Normalized |
 | P4.4 | `settings.discord` | Off by default |
+| P6.5 | `settings.window.placement` | Normalized and clamped to a visible display |
+| P2.10 | none | Update results are session state |
+| P2.11 | none | Original jar kept beside the mod |
+| P3.7 | `settings.minecraftSettings.sync` | Default on; shared files under `minecraft-settings/` |
+| P3.8 | none | Renderer-only |
+| P3.9 | none | `public/artwork/`, `cache/artwork/` |
+| P4.7–P4.10 | none | Builds and packs live on disk under `horizon/` and `bedrock/` |
 
 ### Event names
 
-`crash`, `backups`, `health`, `storage:progress`, `update`, `screenshots`, `notifications`, `lan`, `stats`. Add each to `EventPayloadMap` and handle it in `LauncherProvider.tsx`; never leave an emitted event unhandled.
+`crash`, `backups`, `health`, `storage:progress`, `update`, `screenshots`, `notifications`, `lan`, `stats`, `launch-queue`, `logs:tail`. Add each to `EventPayloadMap` and handle it in `LauncherProvider.tsx`; never leave an emitted event unhandled.
 
 ---
 
-## 14. Decisions needed
+## 15. Decisions needed
 
 | ID | Decision | Blocks | Default if unanswered |
 |---|---|---|---|
 | D1 | Release hosting and code signing for auto-update | P1.7 | Keep manual releases; do not add `electron-updater` |
-| D2 | Are online services (Discord RPC, update feed) acceptable? | P1.7, P4.4 | Stay fully local |
+| D2 | Are online services (Discord RPC, update feed) acceptable? | P1.7 | Discord RPC approved 2026-11-03 as opt-in and off by default; auto-update still needs D1 and the remaining D2 answer. |
 | D3 | CurseForge API terms/key, or file-based import only? | P2.6 (CurseForge part), B19 | File-based only |
 | D4 | First localization languages | P4.6 | Defer the framework; keep strings centralized |
 | D5 | Launcher only, or launcher + server manager? | P5.1 | Stay launcher-only |
@@ -1091,54 +1529,95 @@ Record the answer and date in the changelog when decided.
 
 ---
 
-## 15. Progress tracker
+## 16. Progress tracker
 
 Status values: `todo` · `in progress` · `blocked` · `done`. Keep the note short: owner, PR/commit, blocker, or the next concrete step. An `in progress` row is a claim: other agents should not edit the files listed there without coordinating.
 
 | Package | Status | Note |
 |---|---|---|
-| P0.1 Content index | todo | |
+| P0.1 Content index | done | Buffy · 2026-11-02 · `electron/core/content-index.js` reads Fabric, Quilt, Forge, NeoForge and legacy `mcmod.info` metadata plus `pack.mcmeta`/shader layouts; tolerant per-file scanning; signature-keyed 30s-free disk cache that invalidates on replace/delete; `content:index` IPC. 9 new tests. |
 | P0.2 Snapshot engine | done | `electron/core/snapshots.js` + `tests/snapshots.test.js` (round-trip, zip-slip, retention, interrupted write). `worlds.js` keeps its own writer for now; the duplication is deliberate so P1.3 can migrate it without touching P1.4. |
-| P1.1 Crash Guard | todo | |
-| P1.2 Safe Mode | todo | |
-| P1.3 Scheduled backups | todo | |
+| P1.1 Crash Guard | done | Buffy · 2026-11-02 · `electron/core/crash-analysis.js` (7 rules + unknown fallback, declarative actions), `tests/crash-analysis.test.js` 6 cases; `GameManager` reads the newest crash report and 400-line log tail, stores the last 10 in `store.crashes`, `crash:last|list|analyze`; `CrashDialog` and a last-crash strip in Logs & diagnostics. Dashboard shortcut not added; the Safe Mode action falls back to a normal retry until P1.2. |
+| P1.2 Safe Mode launch | done | Buffy · 2026-11-02 · `electron/core/safe-mode.js` (manifest-before-move, rename with cross-volume copy+sha1 fallback, rollback, conflict-safe restore, orphan recovery), `tests/safe-mode.test.js` 7 cases; launch stages content and restores on exit, spawn failure and quit; `game:recoverSafeMode`; startup recovery before the window; Safe Mode button, running badge and crash-dialog action. |
+| P1.3 Scheduled world backups | done | Buffy · 2026-11-02 · `backups` settings policy (off until enabled) with normalization/validation; pure `isDue`/`nextRunAt`/`planRetention` + 7 tests; 15-minute and focus checks, daily missed-run-once, exit hook for changed worlds; content signatures from `level.dat` + newest region file; atomic ZIPs and index metadata (`pinned`, `automatic`, `contentHash`); JobManager `backup` jobs; retention by count then size; `backups:status|runNow`; Settings → Backups and per-world “Last backup”. |
 | P1.4 Bedrock backups | in progress | Trust/data track. Service + `bedrock:backupWorld|restoreBackup|deleteBackup` + Worlds → Bedrock UI done; `tests/bedrock-backup.test.js` green. Remaining: manual restore into Minecraft for Windows. |
-| P1.5 Health check | todo | |
+| P1.5 Health check | done | Buffy · 2026-11-02 · `electron/core/health.js` checks version metadata, client jar, asset index, sampled libraries, Java major, RAM, free disk, writability, loader profile, shared folders, duplicate mod IDs, wrong-loader jars, missing dependencies and orphaned `.disabled` files; allow-listed fixes only (`reinstall`, `open-settings`, `open-folder`, `create-directory`, `open-content`); 30 s cache and concurrent-request collapse; `health:check|fix|summary`; installation-card status badge and Health dialog. 7 new tests. |
 | P1.6 Storage + cleanup | done | Buffy · 2026-10-28 · `electron/core/storage.js` (9 categories, hardlink-aware, cancel, recycle-bin clean), `storage:scan|clean|cancel` IPC, Settings → Storage panel, `tests/storage.test.js` 10 cases. Deferred: P1.5 integrity reuse (used `effectiveVersionId` instead), backup cleanup shipped in the service behind `includeBackups` but not exposed in the UI. |
 | P1.7 Auto-update | blocked | D1/D2 |
-| P2.1 Mod detail pane | todo | |
-| P2.2 Search filters | todo | |
-| P2.3 Jar inspector | todo | |
-| P2.4 Conflict checker | todo | |
-| P2.5 Drag-and-drop | todo | |
-| P2.6 Modpack import | todo | |
-| P2.7 Modpack export | todo | |
-| P2.8 Datapacks | todo | |
-| P2.9 Screenshot gallery | todo | |
-| P3.1 Command palette + search | todo | |
-| P3.2 Server binding + warnings | todo | |
-| P3.3 LAN discovery | todo | |
-| P3.4 Notification center | todo | |
-| P3.5 Playtime stats | todo | |
-| P3.6 Instance organization | todo | |
-| P4.1 Deep links + CLI | todo | |
-| P4.2 Launcher import | todo | |
-| P4.3 Portable mode | todo | |
-| P4.4 Discord RPC | todo | D2 |
-| P4.5 Accessibility | todo | |
+| P2.1 Mod detail pane | done | Buffy · 2026-11-02 · `ModrinthService.getProject/getVersions` with validated IDs, capped fields, a 10-minute disk cache under `cache/modrinth/` and stale-cache fallback; `mods:project` / `mods:versions` IPC; right-side drawer with Overview, Versions and Dependencies tabs, compatibility filter plus “All versions”, per-version install, plain-text description, gallery and allow-listed external links; inline retry on failure. 4 new tests. |
+| P2.2 Search filters and sorting | done | Buffy · 2026-11-02 · `mods:search` accepts validated `sort`, `categories`, `environment`, `license`, `openSource`, `gameVersion` and `loader` options; Modrinth facets are built server-side from allowlists. Collapsible filter bar with sort/version/loader selects, environment toggle, license, open-source switch and category chips; active-filter count, Clear all, explanatory empty state and persisted `settings.contentFilters` per content type. Search responses are invalidated before debounce and stale loads are ignored. 5 new tests. |
+| P2.3 Jar inspector | done | Buffy · 2026-11-02 · `mods:list` now merges cached `content-index` metadata into every installed row; hand-copied jars show name, version, authors, loader and MC range, with missing-metadata, duplicate-ID and wrong-loader badges. New `content:file` inspects one file with size, install date, normalized metadata and a capped raw Fabric/Quilt/Forge/NeoForge/legacy manifest, plus a side drawer and open-folder action. 2 new tests. |
+| P2.4 Conflict checker | done | Buffy · 2026-11-02 · `electron/core/content-conflicts.js` pure `findConflicts` reports missing required dependencies, duplicate IDs, loader and Minecraft-version mismatches, and a conservative documented incompatible-pairs table; version ranges cover comparators, wildcards, Maven brackets and hyphen forms. `content:conflicts` IPC; issues banner and drawer with disable, open-folder and copy-summary actions. 7 new tests. |
+| P2.5 Drag-and-drop | done | Buffy · 2026-11-02 · `electron/core/content-import.js` validates absolute, non-symlink files; classifies jar/zip contents and routes mods, resource packs, shader packs and Bedrock add-ons; copies atomically with skip/replace/keep-both conflict policies and reports game-running state. `content:importFiles`, preload `files.getPath` via `webUtils`, full-window drop overlay and confirmation drawer. 7 new tests. |
+| P2.6 Modpack import | done | Buffy · 2026-11-02 · `electron/core/modpack-import.js` inspects `.mrpack` manifests and Prism/MultiMC instances before creating anything; validates format, Minecraft/loader versions, manifest and override paths, and blocks zip-slip. `.mrpack` files reuse the verified SHA-1 downloader, overrides and client-overrides, while Prism instances copy with per-file progress or adopt in place. Failures and cancellation remove the half-created profile; the source pack is never moved or modified. `mods:inspectPack|importPack`, a cancellable `modpack-import` job, Installations → Import pack, and a `.mrpack` drop target. 7 new tests. |
+| P2.7 Modpack export | done | Buffy · 2026-11-02 · `electron/core/modpack-export.js` scans mods, resource packs, shader packs and configs; hashes every file and turns Modrinth matches into verified `files[]` downloads, bundling unmatched or disabled content under `overrides/`. Worlds are opt-in with a size warning. `mods:exportPreview|exportPack` back an installation-menu preview with downloadable/bundled counts, and the save dialog writes through a temporary archive before renaming. 3 new tests. |
+| P2.8 Datapacks | done | Buffy · 2026-11-02 · Datapacks are now a first-class Modrinth type with world-scoped `saves/<world>/datapacks` installs, listing, enable/disable and confirmed removal. The Mods page has a world selector and asks for a world when several exist; Worlds adds a per-world manager. `pack.mcmeta` `pack_format` is checked against the profile version and mismatches are warnings, never hard blocks. World paths reject traversal and missing worlds, and installing creates `datapacks/` safely. 3 new tests. |
+| P2.9 Screenshot gallery | done | Buffy · 2026-11-02 · `electron/core/screenshots.js` lists PNG/JPEG screenshots newest-first and reads dimensions from file headers, so a 500-shot folder is never decoded just to list it. Native thumbnails run three at a time and cache by path, mtime and size under `cache/screenshots`; deleting a screenshot sends it to the OS recycle bin and removes every cached size. The new Screenshots page lazy-loads thumbnails, has a next/previous lightbox with copy, reveal, delete and **Use as background**, and shows a helpful empty state for a missing folder. `dashboardBackground` stores a launcher-owned copy that survives restarts, replaces the hero art, and can be cleared back to the stock dashboard. 5 new tests. |
+| P2.10 Installed-content updates | done | Shipped before this catalogue entry: `ModrinthService.checkUpdates/update`, per-row update and **Update all** in Extra content. No dedicated test (network-bound); verified manually. |
+| P2.11 Mod retargeting | done | Shipped: `electron/core/mod-retarget.js`, `mods:retarget*` IPC, `ModRetargetDialog`; `tests/mod-retarget.test.js`. |
+| P3.1 Command palette + search | done | Buffy · 2026-11-02 · A dependency-free fuzzy matcher scores labels ahead of descriptions and keywords; the palette indexes pages, installation actions, worlds, servers, installed mods, settings sections/toggles and account names, with localStorage recent items. `Ctrl+K` and a titlebar search button open the focus-trapped palette; arrows/Enter/Escape drive it, and launch/safe-mode/join commands reuse the existing Play and join flows. A new lightweight `worlds:searchIndex` reads all profiles without sizes, icons or backups. 3 new tests, including 120 installations plus 1,000 worlds. |
+| P3.2 Server binding + warnings | done | Buffy · 2026-11-02 · Server rows now persist a nullable `installationId`; bindings are validated, pruned on load and cleared when their profile is deleted. Every join path (cards, Home recents and the palette) resolves the bound profile before the active one and falls back with a visible note if it disappeared. A 2.5 s status preflight feeds a pure compatibility analyzer: exact Minecraft version, Forge/NeoForge metadata and an online-mode signal from player UUID versions produce one warning sheet with side-by-side server/profile versions and **Join anyway**. The server editor has a profile picker, cards show profile/badge state, and Bedrock keeps its separate launch path with no Java binding. 7 new tests. |
+| P3.3 LAN discovery | done | Buffy · 2026-11-02 · A main-process UDP 4445 listener joins Minecraft's 224.0.2.60 multicast group on every IPv4 adapter, parses `[MOTD]/[AD]` broadcasts, deduplicates by source and port, and expires silent worlds after 10 seconds. Bind/firewall errors are reported in the Servers page instead of crashing; the listener starts once and closes on quit. The new **LAN worlds** section above saved servers shows the live listening state, refresh action, world MOTD, port, source address and a Quick Play join that uses the shared profile/warning path. 5 new tests. |
+| P3.4 Notification center | done | Buffy · 2026-11-02 · `electron/core/notifications.js` validates actions, persists before broadcasting and deduplicates one job state with a key. `Store` keeps the newest 50 notifications with persistent `read`; mark-read and clear IPC never touch crash records or logs. All existing notification emitters now go through the delivery service, which gates by `enabled`/`levels` and only creates native notifications when the setting is on and the window is hidden or unfocused. Job outcomes carry dedupe keys and route actions; crash entries link to the exact report file in Logs. The titlebar bell shows unread count, a popover with mark-all-read and clear, and click-through routes. Settings → Notifications controls center, native and per-level delivery. 5 new tests. |
+| P3.5 Playtime stats | done | Shipped: `stats.js` summary, Stats page heatmap/rankings, CSV export; `tests/stats.test.js`. |
+| P3.6 Instance organization | done | Shipped: `installation-meta.js`, pinned/tagged cards, tag filter, compact view, custom drag order; `tests/installation-meta.test.js`. |
+| P3.7 Shared Minecraft settings | done | Shipped: `minecraft-settings.js`, `minecraftSettings:*` IPC, Settings → Minecraft settings, pre-launch apply and post-exit capture. |
+| P3.8 Unified task board | done | Shipped: `src/pages/TasksPage.tsx`, sidebar footer entry and **Open Tasks** links. |
+| P3.9 Version artwork | done | Shipped: `artwork.js` Aqua endpoint + Mojang drop fallback, `cache/artwork/`, `useHeroArtwork`. |
+| P4.1 Deep links + CLI | done | Shipped: `deep-links.js`, `aqua://` registration, single-instance forwarding, confirmation dialog, Settings → Links & CLI; `tests/deep-links.test.js`. |
+| P4.2 Launcher import | done | Buffy · 2026-11-02 · `electron/core/launcher-import.js` detects vanilla `.minecraft`, Prism/MultiMC, CurseForge and ATLauncher profiles in standard and user-chosen folders without writing to them. Candidates show version, loader, mods, worlds and content size. Adopt in place keeps the source game directory; copy mode copies mods, configs and optional worlds while skipping libraries, assets, versions, caches and launcher metadata. Each profile is created with a unique name, gets its normal install job, and is rolled back alone on failure; results and failures are reported per profile and in the batch job. CurseForge stays file-based and ATLauncher remains read-only. `launcher-import:scan|start`, Installations → Import launcher; 9 new tests. |
+| P4.3 Portable mode | in progress | Buffy · 2026-11-02 · `electron/core/portable.js` detects `--portable`/`portable.txt`, creates `AquaData` and its Electron paths, probes writability, and falls back to AppData with a startup dialog on failure. Startup applies the paths before the single-instance lock; protocol registration and login-at-startup are disabled, Settings shows the data root/portable badge/fallback warning, and links explain the portable limitation. 5 new tests. Remaining: packaged USB + Process Monitor/clean-VM AppData verification. |
+| P4.4 Discord RPC | done | Buffy · 2026-11-03 · `electron/core/discord-presence.js` speaks Discord's local IPC protocol directly (no SDK or dependency): lazy connect across `discord-ipc-0…9`, handshake, exponential backoff while a game is active, and one debug line when Discord is absent. Settings → Discord presence adds off-by-default `discord.enabled`/`showServer`; the second switch is the only way the address enters the activity, and it also enables the join secret/party. Game transitions publish and clear presence; disabling clears immediately and closes the pipe; incoming join requests reuse the normal confirmation flow. 11 new tests. Live presence requires `AQUA_DISCORD_CLIENT_ID` (registered Discord application). |
+| P4.5 Accessibility | done | Buffy · 2026-11-02 · Added a skip-to-content link, page/job live-region announcements, focus return for the notification popover, `aria-describedby` for modal subtitles, and current-section semantics. Settings → Display now has **High contrast** and **Reduce transparency**, applied through `data-contrast`/`data-transparency`; high contrast uses an opaque black token palette, and reduced motion now removes animations/transitions entirely. 32px icon/chip/switch hit targets and a contrast regression test. 3 new tests. Manual NVDA/screen-reader pass remains. |
 | P4.6 Localization | blocked | D4 |
+| P4.7 Horizon builds | done | Shipped: `horizon.js`, `horizon:*` IPC, Installations → Horizon; `tests/horizon.test.js`. |
+| P4.8 Horizon mods + native builds | done | Shipped: `horizon-registry.js`, `horizon-native.js`, Extra content → Horizon Mods; registry/native/mods tests. |
+| P4.9 Bedrock add-ons | done | Shipped: `bedrock-addons.js`, `addon-browser.js`, Extra content → Bedrock Edition; add-on/browser tests. |
+| P4.10 Bedrock builds | done | Shipped: `bedrock-versions.js`, build cards, downloaded-build strip, register/install flows; `tests/bedrock-versions.test.js`. |
 | P5.1 Server manager | blocked | D5 |
 | P5.2 Server pack sync | blocked | P5.1/P2.6 |
 | P5.3 World map | blocked | product decision |
+| P6.1 Pre-launch checklist | todo | Needs a preflight rule table on top of the health cache; see P6.1. |
+| P6.2 Launch queue | todo | Session-only queue; depends on P6.1 for the Play flow. |
+| P6.3 Log tail + mod attribution | todo | Incremental reader plus content-index attribution; no regex. |
+| P6.4 Verify-all maintenance | todo | Batch verification job reusing the installer and health checks. |
+| P6.5 Shortcuts + window placement | todo | Shared shortcut table, cheat sheet, clamped placement persistence. |
+| P6.6 File associations + jump list | todo | Packaged associations, validated `openFile` intent, jump-list entries. |
 
 ---
 
-## 16. Changelog
+## 17. Changelog
 
 | Date | Change |
 |---|---|
+| 2026-11-03 | P4.4 Discord Rich Presence: opt-in and off by default. Aqua talks to Discord's local IPC socket directly (no SDK or dependency), publishes the instance, Minecraft version, loader and elapsed time, and clears presence on exit, crash, disable or disconnect. A second switch exposes the server address and a Join action; incoming requests use the existing confirmation flow. Missing Discord retries with backoff and logs one debug line. 11 new tests. The roadmap gained **Phase 6** (P6.1–P6.6): pre-launch checklist, launch queue, log tail and mod attribution, verify-all maintenance, shortcuts/window placement, and Windows file associations/jump list. Live presence requires a registered Discord application ID supplied through `AQUA_DISCORD_CLIENT_ID`. |
+| 2026-11-02 | P4.5 Accessibility: added **Skip to content**, live-region announcements for page changes and completed/failed/cancelled jobs, `aria-describedby` on modal subtitles, focus return for the notification popover, and current-section semantics. Settings → Display now exposes **High contrast** and **Reduce transparency**, backed by an opaque high-contrast token palette and non-blurred surfaces; reduced motion now disables CSS animation and transitions entirely. Small icon buttons, switches and chips gained 32×32 targets, and a WCAG contrast regression test covers body text on the major surfaces. 3 new tests; manual NVDA/keyboard smoke test remains. |
 | 2026-10-28 | Initial roadmap created from `FEATURE_IDEAS.md`; 33 packages across six phases. |
 | 2026-10-28 | P0.2 snapshot engine added (`snapshots.js`, 10 tests). P1.4 Bedrock world backup/restore/delete added on top of it (IPC, preload, types, Worlds page); manual Store-app restore still pending. |
 | 2026-10-28 | In-app **Roadmap & docs** page (requested directly, not a roadmap package): `src/pages/DocsPage.tsx` renders the README via a small Markdown reader (`src/lib/markdown.ts`), and shows the roadmap as features only (`src/lib/roadmap.ts`) — package title, its `**Outcome:**` sentence and tracker status, with all build steps, contracts and verification text dropped. 6 tests in `tests/docs.test.js`. |
 | 2026-10-28 | P1.6 disk usage and cleanup: `storage.js` scan (installations, versions, libraries, assets, backups, logs, caches, Bedrock), cleanup candidates, and recycle-bin cleaning; Settings → Storage panel with usage bar, category rows and per-item cleanup dialog. 10 tests. |
 | 2026-10-28 | Bedrock **Install build** (requested directly): MSIXVC builds are no longer reference-only — `BedrockVersionsService.install` runs `Add-AppxPackage -Path …` unelevated, adds `-ForceUpdateFromAnyVersion` for a downgrade, verifies Windows lists the package, and reports the failure message when it refuses. Confirmation dialog covers the UWP↔GDK data-folder move. A **Downloaded builds** strip on both Bedrock pages keeps Register/Install reachable for builds below the catalog's first page. 4 tests. |
+| 2026-11-02 | README and roadmap brought back in line with the launcher: documented the Tasks page, shared Minecraft settings, mod retargeting, and edition-aware installs; added nine shipped packages (P2.10, P2.11, P3.7–P3.9, P4.7–P4.10) with tracker rows, contracts and backlog notes. The Docs page now renders README/ROADMAP images through a main-process `docs:image` loader (https only, image content types, 8 MB cap, in-memory cache); parser, renderer, CSS and tests updated. |
+| 2026-11-02 | P1.1 Crash Guard: local rule table classifies out-of-memory, Java version, missing dependency, mixin, graphics, mod conflict and corrupt installs, with declarative actions only. `GameManager` analyzes the crash report plus the session log tail, persists the last 10 crashes, and the renderer shows the classification, evidence and safe actions. 6 new tests; tracker row marked done. |
+| 2026-11-02 | P1.2 Safe Mode: one click moves mods, resource packs and shaders into a per-session folder with a checksummed manifest, then restores them on exit, spawn failure, quit, or the next startup after a kill. Conflicting files are reported instead of overwritten, partial staging rolls back and refuses the launch, and the crash dialog now offers Safe Mode directly. 7 new tests. |
+| 2026-11-02 | P1.3 Scheduled world backups: off-by-default policy with after-play and daily schedules, a 15-minute/focus checker that runs a missed day exactly once, changed-world detection, one cancellable backup job, and count-then-size retention that never removes pinned copies. The Settings page shows last/next run and can run now; world cards show their newest backup. 7 new tests. |
+| 2026-11-02 | P1.5 Health check: one dialog reports missing game files, Java/RAM/disk problems, loader mismatches, shared game folders, duplicate mod IDs, wrong-loader jars, missing dependencies and stale .disabled files. Every row explains the issue and offers only a safe fix (repair, settings, folder, mkdir, mods); results are cached for 30 seconds and summaries badge each installation. 7 new tests. |
+| 2026-11-02 | P0.1 Content index: one reader now answers what a mod, resource pack, shaderpack or datapack actually is. Fabric/Quilt/Forge/NeoForge/legacy manifests and pack metadata are normalized, corrupt archives become null rows instead of failed scans, and a signature-keyed cache rebuilds when a file is replaced or deleted. 9 new tests. |
+| 2026-11-02 | P2.1 Mod detail pane: Modrinth projects now open in a side drawer with title, icon, author, downloads, gallery, license, links, plain-text description, compatibility-filtered versions and declared dependencies. A specific version can be installed without leaving the drawer; project and version responses are cached for ten minutes, IDs are validated, and failures offer an inline retry. 4 new tests. |
+| 2026-11-02 | P2.2 Search filters and sorting: Extra content now has a collapsible filter bar for sort, Minecraft version, loader, environment, license, open source and per-type categories. Every value is validated against server-side allowlists and sent to Modrinth as facet groups; filters persist per content type, reset profile-bound version/loader choices when the profile changes, and rapid typing cancels stale responses. Empty results name the active filters and offer Clear all. 5 new tests. |
+| 2026-11-02 | P2.3 Local jar inspector: installed content is no longer just filenames. Metadata from the cached content index fills in display names, versions, authors, loaders and Minecraft ranges, while missing metadata, duplicate mod IDs and wrong-loader jars get visible flags. A per-file inspector shows size, install date, normalized fields and the raw manifest, with an open-folder action. 2 new tests. |
+| 2026-11-02 | P2.4 Dependency and conflict checker: enabled content is checked for missing required dependencies, duplicate mod IDs, wrong loaders, incompatible Minecraft ranges and a small sourced table of known conflicts. The issues drawer explains each consequence and can disable a file, open the folder or copy a diagnostic summary; disabling refreshes the report. 7 new tests. |
+| 2026-11-02 | P2.5 Drag-and-drop import: dropping files anywhere opens a full-window target and a confirmation drawer. Jars go to mods, zips are inspected for shader/resource-pack contents, Bedrock add-ons route through the existing importer, and duplicate names offer keep-both, replace or skip. Originals are copied atomically, relative/symlink paths are rejected, and imports while the game is running are allowed with a restart warning. 7 new tests. |
+| 2026-11-02 | P2.6 Local modpack import: `.mrpack` and Prism/MultiMC packs become installations without retyping loader or version. Inspection validates the manifest format, Minecraft/loader versions and every manifest/override path before creating a profile; zip-slip is rejected. `.mrpack` reuse the existing SHA-1 downloader and overrides, while Prism folders copy with per-file progress or adopt in place. Failures and cancellation remove the half-created profile without touching the source pack; imports run as cancellable `modpack-import` jobs and can start from Installations or by dropping an `.mrpack`. 7 new tests. |
+| 2026-11-02 | P2.7 Modpack export: any Java installation can now become a `.mrpack`. The preview hashes installed mods, packs and configs, uses Modrinth hash matches as verified downloads, and bundles unmatched or disabled files under `overrides/`. Worlds stay out unless the user opts in and sees their size; the save dialog writes to a temporary archive and renames it into place. 3 new tests. |
+| 2026-11-02 | P2.8 Datapacks: datapacks are now a supported Modrinth content type instead of a manual folder. Installs target `saves/<world>/datapacks`, the Mods page selects or asks for the world, and each world gets a manager for enable/disable/remove and opening the exact folder. `pack.mcmeta` format mismatches are advisory warnings, missing target worlds and traversal paths are rejected, and the folder is created safely. 3 new tests. |
+| 2026-11-02 | P2.9 Screenshot gallery: a new Screenshots page lists every Java screenshot newest-first, lazy-loads thumbnails through a three-job native-image queue, and opens a lightbox with next/previous, copy, reveal, recycle-bin deletion and dashboard-background actions. Dimensions are read from image headers so listing 500 shots does not decode them; thumbnails cache by path, mtime and size and are removed with the source. The chosen background is copied into launcher-owned storage, persists in Settings, and can be cleared. 5 new tests. |
+| 2026-11-02 | P3.1 Command palette: `Ctrl+K` or the titlebar Search button opens a focus-trapped fuzzy palette over pages, installation actions, worlds, servers, installed mods, settings and player profiles, with recent items and arrow/Enter navigation. Launch and safe-mode entries reuse the Play/launch paths, server entries reuse Quick Join, settings entries toggle through the normal validation path, and content updates route into Extra content. A lightweight global world index avoids full world scans, and 1,000-world ranking is covered by tests. 3 new tests. |
+| 2026-11-02 | P3.2 Per-server profiles and join warnings: a server can remember a Java profile, and Quick Join uses it even when another profile is active. Deleting the profile clears the binding without deleting the server; stale bindings are pruned at startup and only valid installations can be saved. Before a Java join, a short status ping checks the reported Minecraft version, Forge/NeoForge markers and (from player UUIDs) likely online-mode authentication, then a single warning sheet shows the server and profile versions side by side with **Join anyway**. The server editor has a profile picker and cards show a compatibility badge and saved-profile note. Bedrock remains on its separate deep-link path. 7 new tests. |
+| 2026-11-02 | P3.3 LAN discovery: a main-process UDP listener joins Minecraft's LAN multicast group on every IPv4 adapter, parses the world MOTD and game port, deduplicates by source and port, and expires worlds after ten seconds without a broadcast. Bind and firewall failures become a readable state instead of a crash, and the socket is stopped with the app. The Servers page now has a live **LAN worlds** section above saved servers with the listening indicator, refresh action, source address and one-click Quick Play join through the shared profile and warning flow. 5 new tests. |
+| 2026-11-02 | P3.4 Notification center: launcher events now persist in a 50-entry, read-aware notification store instead of disappearing with the toast. A main-process delivery layer validates routes, suppresses duplicate job-state entries, respects enabled levels, and shows native Windows notifications only when Aqua is hidden or unfocused. Download/install, Java, backup and crash notices have click-through actions; crash notices target the exact report in Logs. The titlebar bell has unread count, mark-all-read, clear and a popover list, while Settings → Notifications controls the center, native delivery and each level. Clearing never touches crash diagnostics. 5 new tests. |
+| 2026-11-02 | P3.5 Playtime stats: recorded sessions now feed a local-only Stats page with total and average playtime, active days, current and longest streaks, a 12-week local-date heatmap, top installations, most-played versions and recent crashes. The summary is computed in the main process (`stats:summary`); sessions that cross local midnight split across both days while totals stay the sum of stored durations. **Export CSV** writes ISO start/end timestamps, local date, instance name, version and duration through a save dialog. Session retention grew from 20 to 500 entries so the history is meaningful. 6 new tests. |
+| 2026-11-02 | P3.6 Instance organization: each Java profile now stores pinned, tags, colour, cover path and an explicit sortIndex, all normalized and capped in the store. The Installations page keeps pinned cards above the list without changing the Play target, filters by tag (clearing a tag when its last profile is deleted), offers grid/compact views, sorts by recently played, name or custom order, and drag-reorders cards in custom mode. Launching a profile does not rewrite its saved position. 6 new tests. |
+| 2026-11-02 | P4.2 Launcher import: Aqua now discovers vanilla `.minecraft`, Prism/MultiMC, CurseForge and ATLauncher profiles in their standard folders or any chosen instance. The import dialog lists each profile's Minecraft version, loader, mods, worlds and content size, then adopts the existing folder or copies only game content (mods, configs and optional worlds) while skipping shared libraries, assets, versions and caches. Duplicate names get a suffix, every profile is created and rolled back independently, source folders are only read, and results are reported per profile in the dialog and Tasks. `launcher-import:scan|start`; 9 new tests. |
+| 2026-11-02 | P4.3 Portable mode: `--portable` or a `portable.txt` marker now points `userData`, session data, Electron logs, crash dumps and default downloads at `<exeDir>/AquaData` before the single-instance lock is taken. The startup probe falls back to AppData with a readable error dialog when the folder cannot be written, protocol registration and login-at-startup are skipped, and Settings → About/Links show the active data root, portable badge and disabled-link explanation. 5 new tests; packaged USB/AppData-monitor verification remains. |
+| 2026-11-02 | P4.1 Deep links + CLI: `aqua://launch|join|install|open` and `aqua launch|join|install|status` now share one validated parser. The `aqua` scheme is registered at startup, macOS `open-url` and Windows/Linux `second-instance` argv forward into the running window, and the renderer confirms every launch/join/install through the existing Play, Quick Join and modpack flows. `--yes` skips confirmation in scripts; malformed input fails readably without side effects. `aqua status --json` reports only local profile metadata and never tokens, accounts or paths. Settings → Links & CLI shows registration state and copyable examples, with the Windows uninstall caveat documented. 6 new tests. |

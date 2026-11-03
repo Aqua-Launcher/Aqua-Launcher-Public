@@ -32,3 +32,7 @@ release
 # Local testing artifacts
 screenshots
 test-results
+
+# Portable-mode runtime data
+AquaData/
+portable.txt

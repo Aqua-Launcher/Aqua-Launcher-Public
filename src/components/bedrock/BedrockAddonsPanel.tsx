@@ -80,6 +80,14 @@ export function BedrockAddonsPanel() {
     })
   }, [editionId, load])
 
+  useEffect(() => {
+    const refresh = () => {
+      if (editionId) void load(editionId)
+    }
+    window.addEventListener('aqua:content-imported', refresh)
+    return () => window.removeEventListener('aqua:content-imported', refresh)
+  }, [editionId, load])
+
   const grouped = useMemo(() => {
     const groups = new Map<string, BedrockAddon[]>()
     for (const pack of data?.packs ?? []) {

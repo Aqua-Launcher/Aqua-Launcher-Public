@@ -30,6 +30,7 @@ export function Modal({
   className,
 }: ModalProps) {
   const titleId = useId()
+  const subtitleId = useId()
   const overlayRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
@@ -111,6 +112,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
+        aria-describedby={subtitle ? subtitleId : undefined}
         tabIndex={-1}
       >
         {(title || !hideClose) && (
@@ -121,7 +123,11 @@ export function Modal({
                   {title}
                 </h2>
               ) : null}
-              {subtitle ? <p className="modal__subtitle">{subtitle}</p> : null}
+              {subtitle ? (
+                <p className="modal__subtitle" id={subtitleId}>
+                  {subtitle}
+                </p>
+              ) : null}
             </div>
             {!hideClose ? (
               <IconButton label="Close dialog" onClick={onClose}>

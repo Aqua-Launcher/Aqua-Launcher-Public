@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { atomicWriteJson, ensureDir, isPathInside, randomId, readJsonFile, slugify } from './util.js'
+import { planRetention, worldContentSignature } from './backup-scheduler.js'
 
 const MAX_LEVEL_BYTES = 32 * 1024 * 1024
 const MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
@@ -329,6 +330,44 @@ export class WorldsService {
     }
   }
 
+  /** Lightweight names for the command palette; no icons, sizes or backups. */
+  async searchIndex() {
+    const records = []
+    for (const installation of this.store.installations) {
+      const saves = this.savesDirectory(installation)
+      const entries = await fsp.readdir(saves, { withFileTypes: true }).catch(() => [])
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+        const worldDir = path.join(saves, entry.name)
+        const stat = await fsp.stat(worldDir).catch(() => null)
+        if (!stat?.isDirectory()) continue
+        records.push({ installation, folder: entry.name, worldDir, modified: stat.mtime.toISOString() })
+      }
+    }
+
+    const worlds = []
+    for (let index = 0; index < records.length; index += 12) {
+      const batch = records.slice(index, index + 12)
+      const loaded = await Promise.all(
+        batch.map(async (record) => {
+          const metadata = await readWorldMetadata(record.worldDir)
+          return {
+            installationId: record.installation.id,
+            installationName: record.installation.name,
+            folder: record.folder,
+            name: metadata.name,
+            gameMode: metadata.gameMode || 'survival',
+            versionName: metadata.versionName || null,
+            lastPlayed: metadata.lastPlayed || record.modified,
+          }
+        }),
+      )
+      worlds.push(...loaded)
+    }
+    worlds.sort((a, b) => new Date(b.lastPlayed).getTime() - new Date(a.lastPlayed).getTime())
+    return worlds
+  }
+
   async readBackupIndex(installationId) {
     const indexFile = path.join(this.paths.backupsRoot, backupIndexFile(installationId))
     const raw = await readJsonFile(indexFile, null)
@@ -342,6 +381,15 @@ export class WorldsService {
         createdAt: typeof backup.createdAt === 'string' ? backup.createdAt : new Date(0).toISOString(),
         sizeBytes: Number(backup.sizeBytes) || 0,
         note: typeof backup.note === 'string' ? backup.note : null,
+        pinned: backup.pinned === true,
+        automatic: backup.automatic === true,
+        contentHash: typeof backup.contentHash === 'string' ? backup.contentHash : null,
+        lastBackupAt:
+          typeof backup.lastBackupAt === 'string'
+            ? backup.lastBackupAt
+            : typeof backup.createdAt === 'string'
+              ? backup.createdAt
+              : null,
       }))
   }
 
@@ -367,7 +415,21 @@ export class WorldsService {
   }
 
   /** Zips a world into the launcher's backup folder. */
-  async backupWorld(installationId, folder, { note = null } = {}) {
+  /** Folders and their content fingerprints, without the cost of icons/metadata. */
+  async listWorldSignatures(installationId) {
+    const installation = this.installation(installationId)
+    const saves = this.savesDirectory(installation)
+    const entries = await fsp.readdir(saves, { withFileTypes: true }).catch(() => [])
+    const worlds = []
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+      const worldDir = path.join(saves, entry.name)
+      worlds.push({ folder: entry.name, signature: await worldContentSignature(worldDir) })
+    }
+    return worlds
+  }
+
+  async backupWorld(installationId, folder, { note = null, automatic = false, contentHash = null } = {}) {
     const installation = this.installation(installationId)
     const worldDir = await this.resolveWorld(installation, folder)
     const metadata = await readWorldMetadata(worldDir)
@@ -378,12 +440,16 @@ export class WorldsService {
     const directory = this.backupsDirectory(installationId)
     await ensureDir(directory)
     const target = path.join(directory, `${id}.zip`)
+    const temporary = `${target}.part`
 
     try {
       const zip = new AdmZip()
       zip.addLocalFolder(worldDir, folder)
-      await fsp.writeFile(target, zip.toBuffer())
+      // A partly written archive must never replace or confuse the previous good one.
+      await fsp.writeFile(temporary, zip.toBuffer())
+      await fsp.rename(temporary, target)
     } catch (error) {
+      await fsp.rm(temporary, { force: true }).catch(() => {})
       await fsp.rm(target, { force: true }).catch(() => {})
       throw new Error(`Could not create the world backup: ${error.message}`)
     }
@@ -396,12 +462,32 @@ export class WorldsService {
       createdAt: new Date().toISOString(),
       sizeBytes: stat.size,
       note: typeof note === 'string' && note.trim() ? note.trim().slice(0, 200) : null,
+      pinned: false,
+      automatic: automatic === true,
+      contentHash: typeof contentHash === 'string' ? contentHash : null,
+      lastBackupAt: new Date().toISOString(),
     }
     const backups = await this.readBackupIndex(installationId)
     backups.unshift(backup)
     await this.writeBackupIndex(installationId, backups)
     this.logger.info('Created world backup', { installation: installation.name, world: folder, backup: id })
     return backup
+  }
+
+  /** Applies the count/size policy. Index rows are only removed after the ZIPs. */
+  async pruneBackups(installationId, policy) {
+    const backups = await this.listBackups(installationId)
+    const plan = planRetention(backups, policy)
+    if (!plan.deleteIds.length) return { deleted: 0, freedBytes: 0 }
+    for (const id of plan.deleteIds) {
+      await fsp.rm(this.backupFile(installationId, id), { force: true }).catch(() => {})
+    }
+    const remaining = (await this.readBackupIndex(installationId)).filter(
+      (backup) => !plan.deleteIds.includes(backup.id),
+    )
+    await this.writeBackupIndex(installationId, remaining)
+    this.logger.info('Pruned world backups', { installationId, deleted: plan.deleteIds.length })
+    return { deleted: plan.deleteIds.length, freedBytes: plan.freedBytes }
   }
 
   backupFile(installationId, backupId) {

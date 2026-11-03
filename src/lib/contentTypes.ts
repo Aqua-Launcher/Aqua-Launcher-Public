@@ -1,4 +1,4 @@
-import { Download, Image, Package, Sparkles } from 'lucide-react'
+import { Database, Download, Image, Package, Sparkles } from 'lucide-react'
 import type { ModrinthContentType } from './types'
 
 export interface ContentTypeOption {
@@ -47,6 +47,15 @@ export const CONTENT_TYPES: ContentTypeOption[] = [
     folder: 'shaderpacks',
     folderLabel: 'Shaders folder',
     icon: Sparkles,
+  },
+  {
+    id: 'datapack',
+    label: 'Datapacks',
+    noun: 'datapack',
+    plural: 'datapacks',
+    folder: 'datapacks',
+    folderLabel: 'Datapacks folder',
+    icon: Database,
   },
 ]
 

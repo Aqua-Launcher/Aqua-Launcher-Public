@@ -17,9 +17,16 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
+import { analyzeServerCompatibility } from '../lib/serverCompatibility'
 import { relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
-import type { ServerEdition, ServerEntry, ServerStatus } from '../lib/types'
+import type {
+  LanDiscoverySnapshot,
+  LanWorld,
+  ServerEdition,
+  ServerEntry,
+  ServerStatus,
+} from '../lib/types'
 import { useHeroArtwork } from '../components/brand/Artwork'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
@@ -41,20 +48,37 @@ const EDITION_LABELS: Record<ServerEdition, string> = {
 }
 
 export function ServersPage() {
-  const { selectedInstallation, installations, game, launchingId, joinServer, navigate, pushToast, bedrock } =
-    useLauncher()
+  const {
+    selectedInstallation,
+    installations,
+    activeAccount,
+    game,
+    launchingId,
+    joinServer,
+    navigate,
+    pushToast,
+    bedrock,
+  } = useLauncher()
   const [servers, setServers] = useState<ServerEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [statuses, setStatuses] = useState<Record<string, ServerStatus>>({})
   const [pinging, setPinging] = useState<Record<string, boolean>>({})
   const [pingNonce, setPingNonce] = useState(0)
   const [recentJoins, setRecentJoins] = useState<Record<string, string>>({})
+  const [lan, setLan] = useState<LanDiscoverySnapshot>({ worlds: [], listening: false, error: null })
+  const [lanLoading, setLanLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [dialog, setDialog] = useState<ServerDialog | null>(null)
-  const [form, setForm] = useState<{ name: string; address: string; edition: ServerEdition }>({
+  const [form, setForm] = useState<{
+    name: string
+    address: string
+    edition: ServerEdition
+    installationId: string
+  }>({
     name: '',
     address: '',
     edition: 'java',
+    installationId: '',
   })
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -79,6 +103,26 @@ export function ServersPage() {
     void loadServers()
   }, [loadServers])
 
+  const loadLan = useCallback(async () => {
+    setLanLoading(true)
+    try {
+      setLan(await api.servers.lan())
+    } catch (error) {
+      setLan({ worlds: [], listening: false, error: getErrorMessage(error) })
+    } finally {
+      setLanLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadLan()
+    return api.events.subscribe((event) => {
+      if (event.type !== 'servers:lan') return
+      setLan(event.payload as LanDiscoverySnapshot)
+      setLanLoading(false)
+    })
+  }, [loadLan])
+
   const pingOne = useCallback(
     async (server: ServerEntry) => {
       setPinging((current) => ({ ...current, [server.id]: true }))
@@ -98,6 +142,7 @@ export function ServersPage() {
             motd: null,
             version: null,
             protocol: null,
+            modded: false,
             players: { online: 0, max: 0, sample: [] },
             favicon: null,
             error: getErrorMessage(error),
@@ -115,7 +160,7 @@ export function ServersPage() {
   }, [servers, pingNonce, pingOne])
 
   const openAdd = () => {
-    setForm({ name: '', address: '', edition: 'java' })
+    setForm({ name: '', address: '', edition: 'java', installationId: '' })
     setFormError(null)
     setDialog({ mode: 'add' })
   }
@@ -125,6 +170,7 @@ export function ServersPage() {
       name: server.name,
       address: server.connectAddress || server.address,
       edition: server.edition === 'bedrock' ? 'bedrock' : 'java',
+      installationId: server.installationId ?? '',
     })
     setFormError(null)
     setDialog({ mode: 'edit', server })
@@ -139,10 +185,12 @@ export function ServersPage() {
     setSaving(true)
     setFormError(null)
     try {
+      const installationId = form.edition === 'java' ? form.installationId || null : null
       if (dialog?.mode === 'edit') {
         const updated = await api.servers.update(dialog.server.id, {
           name: form.name.trim() || form.address.trim(),
           address: form.address.trim(),
+          installationId,
         })
         setServers((current) => current.map((server) => (server.id === updated.id ? updated : server)))
         pushToast({ level: 'success', title: 'Server updated', message: updated.name })
@@ -151,6 +199,7 @@ export function ServersPage() {
           name: form.name.trim(),
           address: form.address.trim(),
           edition: form.edition,
+          installationId,
         })
         setServers((current) => [...current, created])
         pushToast({ level: 'success', title: 'Server added', message: created.name })
@@ -183,29 +232,38 @@ export function ServersPage() {
       server.id,
       server.connectAddress || server.address,
       server.edition === 'bedrock' ? 'bedrock' : 'java',
+      { installationId: server.installationId, serverName: server.name },
     )
     if (!joined) return
     setRecentJoins((current) => ({ ...current, [server.id]: new Date().toISOString() }))
+  }
+
+  const handleLanJoin = async (world: LanWorld) => {
+    await joinServer(null, world.address, 'java', { serverName: world.motd })
   }
 
   const installation = selectedInstallation
   const artwork = useHeroArtwork(installation?.versionId)
   const artworkStyle = artwork ? ({ '--server-art': `url("${artwork}")` } as CSSProperties) : undefined
   const gameBusy = game.status === 'preparing' || game.status === 'running'
-  const installationBusy = Boolean(installation && launchingId === installation.id)
+  const lanBusy = Boolean(installation && launchingId === installation.id)
   const bedrockEdition = bedrock?.editions[0] ?? null
   const hasJavaServers = servers.some((server) => server.edition !== 'bedrock')
   const hasBedrockServers = servers.some((server) => server.edition === 'bedrock')
+  const profileFor = (server: ServerEntry) =>
+    server.installationId ? installations.find((item) => item.id === server.installationId) || null : null
+  const targetProfileFor = (server: ServerEntry) => profileFor(server) || installation
   const canJoinServer = (server: ServerEntry) =>
-    server.edition === 'bedrock' ? Boolean(bedrockEdition) : Boolean(installation?.installed)
+    server.edition === 'bedrock' ? Boolean(bedrockEdition) : Boolean(targetProfileFor(server)?.installed)
   const joinBlockedReason = (server: ServerEntry) => {
     if (server.edition === 'bedrock') {
       if (!bedrockEdition) return 'Install Minecraft for Windows from the Microsoft Store first'
       return `Join with ${bedrockEdition.name}`
     }
-    if (!installation) return 'Create an installation first'
-    if (!installation.installed) return 'Install the game files first'
-    return `Join with ${installation.name}`
+    const target = targetProfileFor(server)
+    if (!target) return 'Create an installation first'
+    if (!target.installed) return 'Install the game files first'
+    return `Join with ${target.name}`
   }
 
   return (
@@ -228,6 +286,79 @@ export function ServersPage() {
           </div>
         }
       />
+
+      <section className="lan-worlds" aria-labelledby="lan-worlds-title">
+        <div className="lan-worlds__head">
+          <span className="lan-worlds__icon">
+            <Wifi />
+          </span>
+          <div className="lan-worlds__copy">
+            <h2 id="lan-worlds-title">LAN worlds</h2>
+            <p>Open a world to LAN on this network and it appears here automatically.</p>
+          </div>
+          <span className={cx('lan-worlds__state', lan.listening && 'is-live')} title={lan.error || undefined}>
+            <span className="lan-worlds__dot" />
+            {lan.listening ? 'Listening' : lan.error ? 'Unavailable' : lanLoading ? 'Starting…' : 'Not listening'}
+          </span>
+          <Button size="sm" icon={<RefreshCw />} loading={lanLoading} onClick={() => void loadLan()}>
+            Refresh
+          </Button>
+        </div>
+
+        {lan.error ? (
+          <div className="lan-worlds__note">
+            <AlertTriangle />
+            <span>{lan.error}</span>
+          </div>
+        ) : null}
+
+        {lanLoading && !lan.worlds.length ? (
+          <div className="lan-worlds__empty">
+            <Spinner /> Looking for LAN worlds…
+          </div>
+        ) : lan.worlds.length ? (
+          <div className="lan-worlds__grid">
+            {lan.worlds.map((world) => (
+              <article key={world.id} className="lan-world">
+                <span className="lan-world__icon">
+                  <Wifi />
+                </span>
+                <span className="lan-world__copy">
+                  <strong>{world.motd}</strong>
+                  <span className="lan-world__address mono">{world.address}</span>
+                  <span className="lan-world__source">from {world.sourceAddress}</span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={lanBusy ? <Loader2 className="spin" /> : <Play />}
+                  disabled={!installation?.installed || gameBusy || lanBusy}
+                  onClick={() => void handleLanJoin(world)}
+                  title={
+                    !installation
+                      ? 'Create a Java profile first'
+                      : !installation.installed
+                        ? 'Install the profile game files first'
+                        : gameBusy
+                          ? 'Minecraft is already running'
+                          : 'Join this LAN world'
+                  }
+                >
+                  {lanBusy ? 'Joining…' : 'Join'}
+                </Button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="lan-worlds__empty">
+            <Wifi />
+            <span>
+              No LAN worlds yet. On the hosting PC, open a world and choose <strong>Open to LAN</strong>. Keep this page
+              open and Aqua will find it.
+            </span>
+          </div>
+        )}
+      </section>
 
       {hasBedrockServers ? (
         <div className="callout callout--info">
@@ -264,11 +395,12 @@ export function ServersPage() {
             <Server />
           </span>
           <span className="servers-context__copy">
-            <span className="servers-context__title">Joining with {installation.name}</span>
+            <span className="servers-context__title">Default join profile: {installation.name}</span>
             <span className="servers-context__meta">
               Minecraft {installation.versionId}
               {installation.loader?.type && installation.loader.type !== 'vanilla' ? ` · ${installation.loader.type}` : ''} ·{' '}
-              {installations.length} profile{installations.length === 1 ? '' : 's'} configured
+              {installations.length} profile{installations.length === 1 ? '' : 's'} configured · saved servers use their own
+              profile
             </span>
           </span>
           <Button size="sm" variant="ghost" icon={<Layers />} onClick={() => navigate('installations')}>
@@ -313,6 +445,17 @@ export function ServersPage() {
             const online = Boolean(status?.online)
             const direct = status || null
             const lastJoinedAt = recentJoins[server.id] || server.lastJoinedAt
+            const bound = profileFor(server)
+            const usedFallback = Boolean(server.installationId && !bound)
+            const target = bound || installation
+            const targetBusy = Boolean(target && launchingId === target.id)
+            const compatibility = analyzeServerCompatibility({
+              server,
+              installation: target,
+              accountType: activeAccount?.type ?? null,
+              status: status ?? null,
+              usedFallback,
+            })
             return (
               <article key={server.id} className="server-card">
                 <div className="server-card__top">
@@ -325,6 +468,16 @@ export function ServersPage() {
                       {server.edition === 'bedrock' ? (
                         <span className="server-card__edition" title="Runs Minecraft for Windows (Bedrock)">
                           Bedrock
+                        </span>
+                      ) : compatibility.label ? (
+                        <span
+                          className={`server-compat server-compat--${compatibility.level}`}
+                          title={
+                            compatibility.issues.map((issue) => issue.detail).join('\n') ||
+                            `Server ${compatibility.serverVersion || 'unknown'} · profile ${compatibility.instanceVersion || 'unknown'}`
+                          }
+                        >
+                          {compatibility.label}
                         </span>
                       ) : null}
                     </h2>
@@ -410,21 +563,25 @@ export function ServersPage() {
                   <Button
                     variant="primary"
                     size="sm"
-                    icon={installationBusy ? <Loader2 className="spin" /> : <Play />}
-                    disabled={!canJoinServer(server) || gameBusy || installationBusy}
+                    icon={targetBusy ? <Loader2 className="spin" /> : <Play />}
+                    disabled={!canJoinServer(server) || gameBusy || targetBusy}
                     onClick={() => void handleJoin(server)}
                     title={gameBusy ? 'Minecraft is already running' : joinBlockedReason(server)}
                   >
-                    {installationBusy ? 'Launching…' : gameBusy ? 'In game' : 'Join server'}
+                    {targetBusy ? 'Launching…' : gameBusy ? 'In game' : 'Join server'}
                   </Button>
                   <span className="server-card__join-note">
                     {server.edition === 'bedrock'
                       ? bedrockEdition
                         ? `Opens ${bedrockEdition.name}`
                         : 'Bedrock not installed'
-                      : installation
-                        ? installation.name
-                        : 'No installation selected'}
+                      : usedFallback
+                        ? `Saved profile missing · using ${target?.name || 'active profile'}`
+                        : bound
+                          ? `${bound.name} · saved profile`
+                          : installation
+                            ? `Active profile · ${installation.name}`
+                            : 'No installation selected'}
                   </span>
                 </div>
               </article>
@@ -499,7 +656,13 @@ export function ServersPage() {
                     role="radio"
                     aria-checked={form.edition === edition}
                     className={cx(form.edition === edition && 'is-active')}
-                    onClick={() => setForm((current) => ({ ...current, edition }))}
+                    onClick={() =>
+                      setForm((current) => ({
+                        ...current,
+                        edition,
+                        installationId: edition === 'bedrock' ? '' : current.installationId,
+                      }))
+                    }
                   >
                     {EDITION_LABELS[edition]}
                   </button>
@@ -543,6 +706,27 @@ export function ServersPage() {
               spellCheck={false}
             />
           </Field>
+          {form.edition === 'java' ? (
+            <Field
+              label="Join profile"
+              hint="Optional. This server launches with this profile even when another one is active."
+              htmlFor="server-profile"
+            >
+              <select
+                id="server-profile"
+                className="input"
+                value={form.installationId}
+                onChange={(event) => setForm((current) => ({ ...current, installationId: event.target.value }))}
+              >
+                <option value="">Use the active profile</option>
+                {installations.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name} · Minecraft {profile.versionId}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ) : null}
         </form>
       </Modal>
 

@@ -22,6 +22,8 @@ import {
   redactArguments,
 } from './util.js'
 import { getInstallationState } from './installer.js'
+import { analyzeCrash } from './crash-analysis.js'
+import { recoverOrphans, restoreStaged, stageContent } from './safe-mode.js'
 import { effectiveVersionId } from './installations.js'
 
 const APP_VERSION = '1.0.0'
@@ -158,6 +160,7 @@ export class GameManager {
     emitNotification,
     emitInstallations,
     restoreWindow,
+    onSessionEnd = null,
   }) {
     this.paths = paths
     this.versionService = versionService
@@ -171,10 +174,12 @@ export class GameManager {
     this.emitNotification = emitNotification
     this.emitInstallations = emitInstallations
     this.restoreWindow = restoreWindow
+    this.onSessionEnd = onSessionEnd
     this.child = null
     this.current = { status: 'idle' }
     this.logWriter = null
     this.sessionStartedAt = null
+    this.safeModeSession = null
   }
 
   getState() {
@@ -192,7 +197,7 @@ export class GameManager {
     return readJsonFile(candidate, null)
   }
 
-  async launch(installationId, { quickPlay = null } = {}) {
+  async launch(installationId, { quickPlay = null, safeMode = false } = {}) {
     if (this.child) throw new Error('Minecraft is already running. Close it before launching another instance.')
     if (!RESTARTABLE_STATES.has(this.current.status) && this.current.status !== 'running') {
       throw new Error('The launcher is already preparing a launch.')
@@ -208,16 +213,20 @@ export class GameManager {
       installationId: installation.id,
       installationName: installation.name,
       versionId: installation.versionId,
+      serverAddress: null,
       startedAt: null,
       logPath: null,
       pid: null,
       error: null,
       exitCode: null,
+      analysis: null,
       crashReportPath: null,
       endedAt: null,
+      safeMode: { active: false, sessionId: null, movedFiles: 0 },
     })
 
     const launchVersionId = effectiveVersionId(installation)
+    let stagedSafeMode = null
     try {
       const state = await getInstallationState(this.paths, launchVersionId)
       if (!state.installed) {
@@ -242,6 +251,29 @@ export class GameManager {
       await fsp.mkdir(installation.gameDir, { recursive: true })
       const gameDirStat = await fsp.stat(installation.gameDir).catch(() => null)
       if (!gameDirStat?.isDirectory()) throw new Error('The game directory does not exist or is not a folder.')
+
+      if (safeMode) {
+        this.setState({ phase: 'Preparing Safe Mode' })
+        stagedSafeMode = await stageContent(installation.gameDir)
+        this.safeModeSession = {
+          installationId: installation.id,
+          gameDir: installation.gameDir,
+          sessionId: stagedSafeMode.sessionId,
+          movedFiles: stagedSafeMode.movedFiles,
+        }
+        this.setState({
+          safeMode: {
+            active: true,
+            sessionId: stagedSafeMode.sessionId,
+            movedFiles: stagedSafeMode.movedFiles,
+          },
+        })
+        this.logger.info('Safe Mode moved content aside', {
+          installation: installation.name,
+          sessionId: stagedSafeMode.sessionId,
+          movedFiles: stagedSafeMode.movedFiles,
+        })
+      }
 
       this.setState({ phase: 'Refreshing account session' })
       const credentials = await this.accountManager.getLaunchCredentials(account.id)
@@ -328,6 +360,7 @@ export class GameManager {
       this.setState({
         status: 'running',
         phase: 'Running',
+        serverAddress: quickPlay?.address || null,
         pid: child.pid,
         startedAt,
         logPath: plan.logPath,
@@ -355,6 +388,7 @@ export class GameManager {
           installation,
           logPath: plan.logPath,
           startedAt,
+          safeModeSession: this.safeModeSession,
         }).catch((error) => {
           this.logger.error('Failed to finalize game session', { message: error.message })
         })
@@ -380,11 +414,27 @@ export class GameManager {
       this.sessionStartedAt = null
       await this.logWriter?.close().catch(() => {})
       this.logWriter = null
+      const restored = stagedSafeMode?.sessionId
+        ? await restoreStaged(installation.gameDir, stagedSafeMode.sessionId).catch((restoreError) => {
+            this.logger.warn('Could not restore Safe Mode content after a failed launch', {
+              message: restoreError.message,
+            })
+            return null
+          })
+        : null
+      this.safeModeSession = null
       this.setState({
         status: 'failed',
         phase: 'Launch failed',
         error: error.message,
         endedAt: new Date().toISOString(),
+        safeMode: {
+          active: Boolean(restored?.pending),
+          sessionId: stagedSafeMode?.sessionId || null,
+          movedFiles: stagedSafeMode?.movedFiles || 0,
+          restored: restored?.restored || 0,
+          conflicts: restored?.conflicts?.length || 0,
+        },
       })
       this.logger.error('Minecraft launch failed', { message: error.message })
       throw error
@@ -568,16 +618,97 @@ export class GameManager {
     await fsp.writeFile(plan.logPath, header, { encoding: 'utf8', flag: 'w' })
   }
 
-  async handleExit({ code, signal, installation, logPath, startedAt }) {
+  /**
+   * Reads the crash report and the tail of the session log, then hands them to
+   * the local rules. Nothing here changes a file or reaches the network.
+   */
+  async analyzeSession({ installation, code, signal, crash, logPath }) {
+    const reportText = crash?.path ? await fsp.readFile(crash.path, 'utf8').catch(() => '') : ''
+    const logText = await fsp.readFile(logPath, 'utf8').catch(() => '')
+    const logTail = logText.split(/\r?\n/).slice(-400).join('\n')
+    const installedMods = await fsp.readdir(path.join(installation.gameDir, 'mods')).catch(() => [])
+    return analyzeCrash({
+      text: `${reportText}\n${logTail}`.slice(-512 * 1024),
+      exitCode: code,
+      signal,
+      memory: this.current.memory,
+      javaMajor: this.current.javaMajor,
+      installedMods,
+    })
+  }
+
+  hasPendingSafeMode() {
+    return Boolean(this.safeModeSession)
+  }
+
+  /** Restores every Safe Mode session, including ones left by a killed launcher. */
+  async recoverSafeMode() {
+    const directories = [...new Set(this.store.installations.map((entry) => entry.gameDir)), this.paths.instancesRoot]
+    const summary = await recoverOrphans(directories)
+    if (summary.sessions.length) {
+      this.logger.info('Restored Safe Mode content from an earlier session', {
+        sessions: summary.sessions.length,
+        restored: summary.restored,
+        conflicts: summary.conflicts,
+      })
+    }
+    if (summary.conflicts) {
+      this.emitNotification({
+        level: 'warning',
+        title: 'Safe Mode needs attention',
+        message: `${summary.conflicts} file${summary.conflicts === 1 ? '' : 's'} changed while Safe Mode was active and were left in the safe-mode folder.`,
+      })
+    }
+    return summary
+  }
+
+  /** Called on quit when no game is running, so staging never outlives the app. */
+  async restoreSafeModeOnQuit() {
+    if (this.child) return { skipped: true }
+    if (this.safeModeSession) {
+      await restoreStaged(this.safeModeSession.gameDir, this.safeModeSession.sessionId).catch((error) => {
+        this.logger.warn('Could not restore Safe Mode content on quit', { message: error.message })
+      })
+      this.safeModeSession = null
+    }
+    return this.recoverSafeMode()
+  }
+
+  async handleExit({ code, signal, installation, logPath, startedAt, safeModeSession = null }) {
     this.child = null
     const startedMs = new Date(startedAt).getTime()
     const end = Date.now()
     const playtimeMs = Math.max(0, end - startedMs)
     await this.logWriter?.close().catch(() => {})
     this.logWriter = null
+    let safeModeRestore = null
+    if (safeModeSession?.sessionId) {
+      safeModeRestore = await restoreStaged(installation.gameDir, safeModeSession.sessionId).catch((error) => {
+        this.logger.warn('Could not restore Safe Mode content', { message: error.message })
+        return { restored: 0, conflicts: [], pending: true }
+      })
+      if (safeModeRestore.conflicts?.length) {
+        this.logger.warn('Safe Mode restore had conflicts', {
+          installation: installation.name,
+          conflicts: safeModeRestore.conflicts.length,
+        })
+        this.emitNotification({
+          level: 'warning',
+          title: 'Safe Mode could not restore everything',
+          message: `${safeModeRestore.conflicts.length} file${safeModeRestore.conflicts.length === 1 ? '' : 's'} changed during the session and were left in the safe-mode folder.`,
+        })
+      }
+      if (!safeModeRestore.pending) this.safeModeSession = null
+    }
     const crash = await findNewestFile(path.join(installation.gameDir, 'crash-reports'), '.txt', startedMs - 2000)
     const crashed = Boolean(crash) || (code != null && code !== 0) || Boolean(signal)
     const endedAt = new Date(end).toISOString()
+    const analysis = crashed
+      ? await this.analyzeSession({ installation, code, signal, crash, logPath }).catch((error) => {
+          this.logger.warn('Could not analyse the crash', { message: error.message })
+          return null
+        })
+      : null
     this.setState({
       status: crashed ? 'crashed' : 'exited',
       phase: crashed ? 'Game crashed' : 'Game closed',
@@ -585,8 +716,31 @@ export class GameManager {
       signal,
       endedAt,
       crashReportPath: crash?.path || null,
+      analysis,
       playtimeMs,
+      safeMode: safeModeSession
+        ? {
+            active: Boolean(safeModeRestore?.pending),
+            sessionId: safeModeSession.sessionId,
+            movedFiles: safeModeSession.movedFiles || 0,
+            restored: safeModeRestore?.restored || 0,
+            conflicts: safeModeRestore?.conflicts?.length || 0,
+          }
+        : this.current.safeMode || { active: false, sessionId: null, movedFiles: 0 },
     })
+    if (analysis) {
+      await this.store
+        .addCrash({
+          ...analysis,
+          installationId: installation.id,
+          installationName: installation.name,
+          at: endedAt,
+          exitCode: code,
+          signal,
+          reportPath: crash?.path || null,
+        })
+        .catch((error) => this.logger.warn('Could not save the crash', { message: error.message }))
+    }
     this.logger.info('Minecraft session ended', {
       installation: installation.name,
       code,
@@ -623,15 +777,50 @@ export class GameManager {
       this.logger.error('Could not save game session', { message: error.message })
     }
 
+    // Backups are queued after the session is recorded; the exit dialog and the
+    // next launch never wait for a ZIP to finish.
+    if (this.onSessionEnd) {
+      try {
+        const pending = this.onSessionEnd({
+          installationId: installation.id,
+          startedAt,
+          endedAt,
+          crashed,
+        })
+        if (pending && typeof pending.catch === 'function') {
+          pending.catch((error) => this.logger.warn('Could not queue world backups', { message: error.message }))
+        }
+      } catch (error) {
+        this.logger.warn('Could not queue world backups', { message: error.message })
+      }
+    }
+
     if (this.store.settings.startup.reopenOnGameExit) {
       this.restoreWindow?.()
     }
+    const reportName = crash?.path ? path.basename(crash.path) : null
     this.emitNotification({
       level: crashed ? 'error' : 'info',
       title: crashed ? 'Minecraft crashed' : 'Minecraft closed',
       message: crashed
         ? `The game exited unexpectedly${code != null ? ` (code ${code})` : ''}. Open Logs & diagnostics for details.`
         : `Session ended after ${formatDuration(playtimeMs)}.`,
+      dedupeKey: `game:${installation.id}:${endedAt}`,
+      action: crashed
+        ? {
+            page: 'logs',
+            params: {
+              category: 'crash',
+              installationId: installation.id,
+              ...(reportName ? { file: reportName } : {}),
+            },
+            label: reportName ? 'View crash report' : 'Open crash reports',
+          }
+        : {
+            page: 'logs',
+            params: { category: 'game', installationId: installation.id, file: path.basename(logPath) },
+            label: 'View game log',
+          },
     })
   }
 }

@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Server,
   Settings,
+  ShieldCheck,
   UserRound,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
@@ -92,6 +93,7 @@ export function HomePage() {
     play,
     joinServer,
     installGame,
+    launchGame,
     pushToast,
     openInstallationFolder,
     bedrock,
@@ -120,6 +122,32 @@ export function HomePage() {
         : null
   const heroArtwork = useHeroArtwork(heroVersion)
   useNow(gameRunning || gamePreparing)
+
+  const [dashboardBackground, setDashboardBackground] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!settings?.dashboardBackground) {
+      setDashboardBackground(null)
+      return
+    }
+    setDashboardBackground(null)
+    void api.screenshots
+      .background()
+      .then((result) => {
+        if (!cancelled) setDashboardBackground(result.dataUrl)
+      })
+      .catch(() => {
+        if (!cancelled) setDashboardBackground(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [settings?.dashboardBackground])
+
+  // A chosen screenshot owns the dashboard, so it replaces the release artwork
+  // in the hero instead of sitting unseen behind it.
+  const heroImage = dashboardBackground || heroArtwork
 
   const [recentServers, setRecentServers] = useState<ServerEntry[]>([])
 
@@ -164,6 +192,7 @@ export function HomePage() {
       server.id,
       server.connectAddress || server.address,
       server.edition === 'bedrock' ? 'bedrock' : 'java',
+      { installationId: server.installationId, serverName: server.name },
     )
     if (joined) void loadRecentServers()
   }
@@ -263,10 +292,19 @@ export function HomePage() {
       : 'Add an offline profile to launch the game. You can create an installation first if you prefer.'
 
   return (
-    <div className="page page--home">
-      <section className={cx('hero', isPlayingSelected && 'is-playing', heroArtwork && 'hero--art')}>
-        {heroArtwork ? (
-          <div className="hero__artwork" style={{ backgroundImage: `url("${heroArtwork}")` }} aria-hidden="true" />
+    <div
+      className={cx('page page--home', dashboardBackground && 'has-background')}
+      style={
+        dashboardBackground
+          ? {
+              backgroundImage: `linear-gradient(180deg, rgba(6, 10, 14, 0.48), rgba(6, 10, 14, 0.9)), url("${dashboardBackground}")`,
+            }
+          : undefined
+      }
+    >
+      <section className={cx('hero', isPlayingSelected && 'is-playing', heroImage && 'hero--art')}>
+        {heroImage ? (
+          <div className="hero__artwork" style={{ backgroundImage: `url("${heroImage}")` }} aria-hidden="true" />
         ) : (
           <div className="hero__scene">
             <VoxelScene />
@@ -289,6 +327,17 @@ export function HomePage() {
                     {playIcon}
                     <span>{playLabel}</span>
                   </button>
+                  {targetIsJava && selectedInstallation && selectedInstallation.installed && !installJob && !isPreparingSelected && !isPlayingSelected && !otherGameRunning ? (
+                    <button
+                      type="button"
+                      className="btn btn--safe"
+                      onClick={() => void launchGame(selectedInstallation.id, { safeMode: true })}
+                      title="Launch without mods, resource packs, or shaders"
+                    >
+                      <ShieldCheck />
+                      <span>Safe Mode</span>
+                    </button>
+                  ) : null}
                   {targetIsJava && selectedInstallation ? (
                     <AccountSwitcherToggle
                       key={selectedInstallation.id}

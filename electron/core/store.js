@@ -2,11 +2,47 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomId, atomicWriteJson, readJsonFile, runId } from './util.js'
 import { createDefaultSettings, normalizeSettings } from './settings.js'
+import { normalizeBackupPolicy } from './backup-scheduler.js'
+import { normalizeInstallationMeta } from './installation-meta.js'
+import { normalizeNotification } from './notifications.js'
 
 const SCHEMA_VERSION = 1
 const MAX_ACTIVITY = 40
-const MAX_SESSIONS = 20
+// Sessions are tiny and private; a longer history is what makes the stats page
+// meaningful. The list is still bounded so the config cannot grow forever.
+const MAX_SESSIONS = 500
 const MAX_SERVERS = 100
+const MAX_CRASHES = 10
+const MAX_NOTIFICATIONS = 50
+
+/** A classified crash is small and self-contained, so it is safe to persist. */
+function normalizeCrash(raw) {
+  if (!raw || typeof raw !== 'object' || !raw.category || !raw.title) return null
+  const evidence = Array.isArray(raw.evidence)
+    ? raw.evidence.filter((line) => typeof line === 'string').slice(0, 5).map((line) => line.slice(0, 300))
+    : []
+  const actions = Array.isArray(raw.actions)
+    ? raw.actions
+        .filter((action) => action && typeof action.id === 'string')
+        .slice(0, 4)
+        .map((action) => ({ id: action.id.slice(0, 40), label: String(action.label || action.id).slice(0, 80) }))
+    : []
+  return {
+    id: typeof raw.id === 'string' ? raw.id : randomId(),
+    installationId: typeof raw.installationId === 'string' ? raw.installationId : null,
+    installationName: typeof raw.installationName === 'string' ? raw.installationName.slice(0, 80) : null,
+    at: typeof raw.at === 'string' ? raw.at : new Date().toISOString(),
+    category: String(raw.category).slice(0, 40),
+    confidence: ['high', 'medium', 'low'].includes(raw.confidence) ? raw.confidence : 'low',
+    title: String(raw.title).slice(0, 120),
+    summary: String(raw.summary || '').slice(0, 400),
+    exitCode: Number.isFinite(raw.exitCode) ? raw.exitCode : null,
+    signal: typeof raw.signal === 'string' ? raw.signal.slice(0, 20) : null,
+    reportPath: typeof raw.reportPath === 'string' ? raw.reportPath : null,
+    evidence,
+    actions,
+  }
+}
 
 /** A profile created from a Modrinth modpack remembers which pack it came from. */
 function normalizeModpack(raw) {
@@ -75,6 +111,11 @@ function normalizeInstallation(raw, defaultGameDir) {
     windowOverride,
     jvmArgsOverride: typeof raw.jvmArgsOverride === 'string' ? raw.jvmArgsOverride : null,
     gameArgsOverride: typeof raw.gameArgsOverride === 'string' ? raw.gameArgsOverride : null,
+    backupPolicy:
+      raw.backupPolicy && typeof raw.backupPolicy === 'object'
+        ? normalizeBackupPolicy(raw.backupPolicy)
+        : null,
+    ...normalizeInstallationMeta(raw),
   }
 }
 
@@ -90,6 +131,10 @@ function normalizeServer(raw) {
         ? raw.connectAddress.trim().slice(0, 300)
         : raw.address.trim().slice(0, 300),
     edition: raw.edition === 'bedrock' ? 'bedrock' : 'java',
+    installationId:
+      raw.edition !== 'bedrock' && typeof raw.installationId === 'string' && raw.installationId.trim()
+        ? raw.installationId.trim().slice(0, 128)
+        : null,
     addedAt: raw.addedAt || new Date().toISOString(),
     lastJoinedAt: raw.lastJoinedAt || null,
   }
@@ -149,6 +194,12 @@ export class Store {
       sessions: Array.isArray(raw?.sessions)
         ? raw.sessions.filter((item) => item && typeof item === 'object').slice(0, MAX_SESSIONS)
         : [],
+      notifications: Array.isArray(raw?.notifications)
+        ? raw.notifications.map(normalizeNotification).filter(Boolean).slice(0, MAX_NOTIFICATIONS)
+        : [],
+      crashes: Array.isArray(raw?.crashes)
+        ? raw.crashes.map(normalizeCrash).filter(Boolean).slice(0, MAX_CRASHES)
+        : [],
     }
 
     if (!this.data.installations.find((installation) => installation.id === this.data.activeInstallationId)) {
@@ -156,6 +207,13 @@ export class Store {
     }
     if (!this.data.accounts.find((account) => account.id === this.data.activeAccountId)) {
       this.data.activeAccountId = this.data.accounts[0]?.id || null
+    }
+    // A profile can disappear outside the launcher (or before an upgrade). Keep
+    // the server row, but never leave a binding that cannot resolve.
+    for (const server of this.data.servers) {
+      if (server.installationId && !this.getInstallation(server.installationId)) {
+        server.installationId = null
+      }
     }
     if (!raw) {
       await this.save()
@@ -194,6 +252,14 @@ export class Store {
 
   get servers() {
     return this.data.servers
+  }
+
+  get crashes() {
+    return this.data.crashes
+  }
+
+  get notifications() {
+    return this.data.notifications
   }
 
   get activeInstallation() {
@@ -243,6 +309,9 @@ export class Store {
     const [removed] = this.data.installations.splice(index, 1)
     if (this.data.activeInstallationId === id) {
       this.data.activeInstallationId = this.data.installations[0]?.id || null
+    }
+    for (const server of this.data.servers) {
+      if (server.installationId === id) server.installationId = null
     }
     await this.save()
     return removed
@@ -368,6 +437,43 @@ export class Store {
     await this.save()
   }
 
+  async addNotification(entry) {
+    const notification = normalizeNotification(entry)
+    if (!notification) return null
+    this.data.notifications.unshift(notification)
+    this.data.notifications = this.data.notifications.slice(0, MAX_NOTIFICATIONS)
+    await this.save()
+    return notification
+  }
+
+  async markNotificationsRead(ids = null) {
+    const selected = Array.isArray(ids) ? new Set(ids.filter((id) => typeof id === 'string')) : null
+    let changed = false
+    for (const notification of this.data.notifications) {
+      if (!notification.read && (!selected || selected.has(notification.id))) {
+        notification.read = true
+        changed = true
+      }
+    }
+    if (changed) await this.save()
+    return this.data.notifications
+  }
+
+  async clearNotifications() {
+    this.data.notifications = []
+    await this.save()
+    return this.data.notifications
+  }
+
+  async addCrash(entry) {
+    const crash = normalizeCrash({ ...entry, id: entry?.id || randomId(), at: entry?.at || new Date().toISOString() })
+    if (!crash) return null
+    this.data.crashes.unshift(crash)
+    this.data.crashes = this.data.crashes.slice(0, MAX_CRASHES)
+    await this.save()
+    return crash
+  }
+
   publicServer(server) {
     if (!server) return null
     return {
@@ -376,6 +482,7 @@ export class Store {
       address: server.address,
       connectAddress: server.connectAddress || server.address,
       edition: server.edition === 'bedrock' ? 'bedrock' : 'java',
+      installationId: server.installationId || null,
       addedAt: server.addedAt,
       lastJoinedAt: server.lastJoinedAt,
     }

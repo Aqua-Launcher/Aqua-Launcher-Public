@@ -91,10 +91,47 @@ export interface LoaderVersion {
   stable: boolean
 }
 
+export interface BackupPolicy {
+  enabled: boolean
+  onExit: boolean
+  daily: boolean
+  dailyHour: number
+  retentionCount: number
+  maxTotalMb: number
+}
+
+export interface BackupStatus {
+  running: boolean
+  lastRunAt: string | null
+  lastResult: {
+    at: string
+    reason: 'daily' | 'exit' | 'manual'
+    backedUp: number
+    skipped: number
+    failed: number
+  } | null
+  nextRunAt: string | null
+}
+
+export type ContentFilterEnvironment = 'any' | 'client' | 'server'
+export type ContentFilterSort = 'relevance' | 'downloads' | 'follows' | 'newest' | 'updated'
+
+export interface ContentFilterEntry {
+  categories: string[]
+  environment: ContentFilterEnvironment
+  license: string | null
+  openSource: boolean
+  sort: ContentFilterSort
+}
+
+export type ContentFilters = Partial<Record<ModrinthContentType, ContentFilterEntry>>
+
 export interface Settings {
   onboardingComplete: boolean
   theme: ThemeName
   accent: AccentName
+  /** Launcher-owned image path used behind the dashboard, or null. */
+  dashboardBackground: string | null
   customTheme: CustomThemeSettings
   fontFamily: FontFamily
   roundedCorners: boolean
@@ -103,6 +140,8 @@ export interface Settings {
   chunkyChromeLinked: boolean
   uiScale: number
   reduceMotion: boolean
+  highContrast: boolean
+  reduceTransparency: boolean
   ambient: boolean
   java: { mode: 'auto' | 'path'; path: string | null }
   memory: { minMb: number; maxMb: number }
@@ -113,6 +152,20 @@ export interface Settings {
   gameArgs: string
   microsoftClientId: string
   minecraftSettings: { sync: boolean }
+  backups: BackupPolicy
+  contentFilters: ContentFilters
+  notifications: {
+    enabled: boolean
+    native: boolean
+    levels: {
+      success: boolean
+      info: boolean
+      warning: boolean
+      error: boolean
+    }
+  }
+  /** Opt-in Discord Rich Presence; off by default. */
+  discord: { enabled: boolean; showServer: boolean }
   startup: {
     launchAtLogin: boolean
     startMinimized: boolean
@@ -128,6 +181,8 @@ export interface InstallationModpack {
   iconUrl: string | null
   versionId: string | null
 }
+
+export type InstallationColor = 'slate' | 'blue' | 'teal' | 'green' | 'amber' | 'rose' | 'violet'
 
 export interface Installation {
   id: string
@@ -150,6 +205,14 @@ export interface Installation {
   windowOverride: { width: number; height: number; fullscreen: boolean } | null
   jvmArgsOverride: string | null
   gameArgsOverride: string | null
+  backupPolicy: BackupPolicy | null
+  /** Pinned profiles sort above everything else without changing the Play target. */
+  pinned: boolean
+  tags: string[]
+  color: InstallationColor | null
+  coverPath: string | null
+  /** Explicit drag-to-reorder position; null follows the default sorting. */
+  sortIndex: number | null
   installed: boolean
   installedAt: string | null
   assetIndexId: string | null
@@ -223,11 +286,70 @@ export interface SessionEntry {
   playtimeMs: number
 }
 
+export interface StatsDay {
+  /** Local calendar day, `YYYY-MM-DD`. */
+  date: string
+  playtimeMs: number
+  sessions: number
+}
+
+export interface StatsTotals {
+  playtimeMs: number
+  sessions: number
+  activeDays: number
+  averageSessionMs: number
+  longestSessionMs: number
+  firstSessionAt: string | null
+  lastSessionAt: string | null
+}
+
+export interface StatsInstallation {
+  installationId: string
+  name: string
+  versionId: string | null
+  missing: boolean
+  playtimeMs: number
+  sessions: number
+  lastPlayedAt: string | null
+}
+
+export interface StatsVersion {
+  versionId: string
+  playtimeMs: number
+  sessions: number
+}
+
+export interface StatsCrash {
+  id: string
+  at: string
+  title: string
+  category: string
+  installationId: string | null
+  installationName: string | null
+}
+
+export interface PlaytimeStats {
+  generatedAt: string
+  range: { start: string; end: string; weeks: number }
+  hasHistory: boolean
+  totals: StatsTotals
+  days: StatsDay[]
+  topInstallations: StatsInstallation[]
+  versions: StatsVersion[]
+  streak: { currentDays: number; longestDays: number }
+  recentCrashes: StatsCrash[]
+}
+
+export interface StatsExportResult {
+  path: string
+  rows: number
+}
+
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 export interface DownloadJob {
   id: string
-  type: 'install' | 'java'
+  type: 'install' | 'java' | 'backup' | 'modpack-import' | 'launcher-import'
   installationId: string | null
   installationName: string | null
   versionId: string | null
@@ -249,6 +371,7 @@ export interface DownloadJob {
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
+  result?: unknown
 }
 
 export type GameStatus = 'idle' | 'preparing' | 'running' | 'exited' | 'crashed' | 'failed'
@@ -259,6 +382,8 @@ export interface GameState {
   installationId?: string
   installationName?: string
   versionId?: string
+  /** Set when this session was started straight into a server. */
+  serverAddress?: string | null
   pid?: number | null
   startedAt?: string | null
   endedAt?: string | null
@@ -271,7 +396,192 @@ export interface GameState {
   exitCode?: number | null
   signal?: string | null
   crashReportPath?: string | null
+  /** Crash Guard's classification of a failed session. */
+  analysis?: CrashAnalysis | null
   playtimeMs?: number
+  /** Present while Safe Mode content is staged, and after a restore attempt. */
+  safeMode?: {
+    active: boolean
+    sessionId: string | null
+    movedFiles: number
+    restored?: number
+    conflicts?: number
+  }
+}
+
+export interface CrashAction {
+  id: string
+  label: string
+}
+
+export interface CrashAnalysis {
+  category: string
+  confidence: 'high' | 'medium' | 'low'
+  title: string
+  summary: string
+  evidence: string[]
+  actions: CrashAction[]
+}
+
+export interface CrashRecord extends CrashAnalysis {
+  id: string
+  installationId: string | null
+  installationName: string | null
+  at: string
+  exitCode: number | null
+  signal: string | null
+  reportPath: string | null
+}
+
+export type HealthStatus = 'ok' | 'warn' | 'error' | 'unknown'
+export type HealthFixKind = 'reinstall' | 'open-settings' | 'open-folder' | 'create-directory' | 'open-content'
+
+export interface HealthCheck {
+  id: string
+  status: HealthStatus
+  title: string
+  detail: string
+  fix?: { kind: HealthFixKind; label: string }
+}
+
+export interface HealthResult {
+  installationId: string
+  status: HealthStatus
+  checks: HealthCheck[]
+  checkedAt: string
+  versionId: string
+}
+
+export interface HealthSummary {
+  installations: { installationId: string; status: HealthStatus }[]
+  status: HealthStatus
+}
+
+export type ContentType = 'mods' | 'resourcepacks' | 'shaderpacks' | 'datapacks'
+
+export interface ContentMetadata {
+  modId: string | null
+  name: string | null
+  version: string | null
+  authors: string[]
+  loader: string | null
+  mcRange: string | null
+  requiredDependencies: string[]
+  description?: string | null
+  format?: number | null
+  shaders?: string[]
+  type?: 'resourcepack' | 'datapack' | 'shaderpack'
+}
+
+export interface ContentFile {
+  filename: string
+  enabled: boolean
+  sizeBytes: number
+  mtimeMs: number
+  metadata: ContentMetadata | null
+  reason: string | null
+}
+
+export interface RawContentManifest {
+  source: string
+  format: 'json' | 'toml'
+  content: string
+}
+
+export interface ContentFileDetail {
+  filename: string
+  enabled: boolean
+  directory: string
+  sizeBytes: number
+  mtimeMs: number
+  installedAt: string
+  metadata: ContentMetadata | null
+  reason: string | null
+  raw: RawContentManifest | null
+}
+
+export interface MissingDependencyConflict {
+  dependencyId: string
+  filename: string
+  modId: string | null
+  modName: string
+}
+
+export interface DuplicateIdConflict {
+  modId: string
+  files: { filename: string; name: string }[]
+}
+
+export interface LoaderMismatchConflict {
+  filename: string
+  name: string
+  modId: string | null
+  loader: string
+  expectedLoader: string
+}
+
+export interface VersionMismatchConflict {
+  filename: string
+  name: string
+  modId: string | null
+  range: string
+  gameVersion: string
+}
+
+export interface KnownIncompatibleConflict {
+  left: { filename: string; name: string }
+  right: { filename: string; name: string }
+  reason: string
+  source: string
+}
+
+export interface ContentConflictsResult {
+  missingDependencies: MissingDependencyConflict[]
+  duplicateIds: DuplicateIdConflict[]
+  loaderMismatch: LoaderMismatchConflict[]
+  versionMismatch: VersionMismatchConflict[]
+  knownIncompatible: KnownIncompatibleConflict[]
+  total: number
+}
+
+export type ContentImportTarget = 'mod' | 'resourcepack' | 'shader' | 'bedrock' | 'unsupported'
+export type ContentImportContentType = 'mod' | 'resourcepack' | 'shader' | 'bedrock'
+export type ContentImportPolicy = 'ask' | 'replace' | 'skip' | 'keep-both'
+
+export interface ContentImportItem {
+  sourcePath: string
+  filename: string
+  target: ContentImportTarget
+  destination: string | null
+  conflict: boolean
+  reason: string | null
+}
+
+export interface ContentImportResult {
+  items: ContentImportItem[]
+  imported: Array<{ filename: string; contentType: ContentImportContentType; destination: string }>
+  skipped: Array<{ filename: string; reason: string }>
+  conflicts: Array<{ filename: string; destination: string | null }>
+  errors: Array<{ filename: string; reason: string }>
+  gameRunning: boolean
+}
+
+export interface ContentImportRequest {
+  installationId: string | null
+  contentType: ModrinthContentType
+  paths: string[]
+  dryRun?: boolean
+  conflictPolicy?: ContentImportPolicy
+  bedrockEditionId?: string | null
+}
+
+export interface ContentIndexResult {
+  directory: string
+  contentType: ContentType
+  exists: boolean
+  files: ContentFile[]
+  cached: boolean
+  scannedAt: string
 }
 
 export interface JavaInfo {
@@ -325,6 +635,72 @@ export interface AuthState {
   secureStorageAvailable?: boolean
 }
 
+export type NotificationLevel = 'success' | 'error' | 'info' | 'warning'
+
+export interface NotificationAction {
+  page: PageName
+  params?: RouteState['params']
+  label?: string
+}
+
+export interface LinkExample {
+  label: string
+  description: string
+  value: string
+}
+
+export interface LinkStatus {
+  scheme: string
+  registered: boolean
+  portable: boolean
+  examples: LinkExample[]
+}
+
+/** One validated action from `aqua://` or the CLI, handed to the renderer. */
+export type LinkIntent =
+  | {
+      kind: 'launch'
+      instance: string | null
+      confirmed: boolean
+      source: 'link' | 'cli'
+      json?: boolean
+    }
+  | {
+      kind: 'join'
+      server: string
+      instance: string | null
+      edition: ServerEdition
+      confirmed: boolean
+      source: 'link' | 'cli'
+      json?: boolean
+    }
+  | {
+      kind: 'install'
+      project: string
+      confirmed: boolean
+      source: 'link' | 'cli'
+      json?: boolean
+    }
+  | {
+      kind: 'open'
+      page: PageName
+      contentType?: ModrinthContentType
+      section?: string
+      confirmed: boolean
+      source: 'link' | 'cli'
+      json?: boolean
+    }
+
+export interface AppNotification {
+  id: string
+  level: NotificationLevel
+  title: string
+  message: string
+  at: string
+  read: boolean
+  action: NotificationAction | null
+}
+
 export interface Bootstrap {
   app: {
     name: string
@@ -332,8 +708,12 @@ export interface Bootstrap {
     packaged: boolean
     platform: string
     canLaunchAtLogin: boolean
+    portable: boolean
+    portableSource: 'flag' | 'marker' | null
+    portableWarning: string | null
   }
   settings: Settings
+  notifications: AppNotification[]
   installations: Installation[]
   accounts: AccountsState
   activity: ActivityEntry[]
@@ -397,6 +777,7 @@ export type AppEvent =
   | { type: 'game'; payload: GameState }
   | { type: 'auth'; payload: AuthState }
   | { type: 'notification'; payload: NotificationPayload }
+  | { type: 'app:route'; payload: { intent: LinkIntent } }
   | { type: 'windowState'; payload: { maximized: boolean } }
 
 export interface Toast {
@@ -413,7 +794,9 @@ export type PageName =
   | 'installations'
   | 'tasks'
   | 'worlds'
+  | 'screenshots'
   | 'servers'
+  | 'stats'
   | 'mods'
   | 'account'
   | 'logs'
@@ -427,7 +810,43 @@ export interface RouteState {
     installationId?: string
     file?: string
     contentType?: ModrinthContentType
+    section?: string
+    action?: 'check-updates'
   }
+}
+
+export interface ScreenshotImage {
+  filename: string
+  size: number
+  modified: string
+  width: number | null
+  height: number | null
+}
+
+export interface ScreenshotList {
+  directory: string
+  exists: boolean
+  images: ScreenshotImage[]
+}
+
+export interface ScreenshotThumbnail {
+  dataUrl: string
+  width: number | null
+  height: number | null
+}
+
+export interface DashboardBackground {
+  dataUrl: string | null
+}
+
+export interface WorldSearchEntry {
+  installationId: string
+  installationName: string
+  folder: string
+  name: string
+  gameMode: string
+  versionName: string | null
+  lastPlayed: string
 }
 
 /** The three editions that can be installed from the one installation screen. */
@@ -453,7 +872,7 @@ export interface InstallationInput {
   gameArgs?: string | null
 }
 
-export type ModrinthContentType = 'mod' | 'modpack' | 'resourcepack' | 'shader'
+export type ModrinthContentType = 'mod' | 'modpack' | 'resourcepack' | 'shader' | 'datapack'
 
 export interface ModrinthHit {
   id: string
@@ -477,7 +896,50 @@ export interface ModrinthSearchResult {
   limit: number
   loader: string | null
   minecraftVersion: string | null
+  sort: ContentFilterSort
+  categories: string[]
+  environment: ContentFilterEnvironment
+  license: string | null
+  openSource: boolean
   hits: ModrinthHit[]
+}
+
+export interface ModrinthProjectDetail {
+  id: string
+  slug: string | null
+  title: string
+  description: string
+  body: string
+  iconUrl: string | null
+  author: string | null
+  downloads: number
+  followers: number
+  categories: string[]
+  projectType: string | null
+  clientSide: string | null
+  serverSide: string | null
+  license: { id: string | null; name: string | null; url: string | null } | null
+  sourceUrl: string | null
+  issuesUrl: string | null
+  wikiUrl: string | null
+  discordUrl: string | null
+  gallery: { url: string; title: string | null; description: string | null; featured: boolean }[]
+  published: string | null
+  updated: string | null
+}
+
+export interface ModrinthVersion {
+  id: string
+  name: string
+  versionNumber: string
+  versionType: string
+  gameVersions: string[]
+  loaders: string[]
+  datePublished: string | null
+  downloads: number
+  changelog: string
+  files: { url: string; filename: string; size: number; primary: boolean }[]
+  dependencies: { projectId: string | null; versionId: string | null; dependencyType: string }[]
 }
 
 export interface InstalledMod {
@@ -493,6 +955,8 @@ export interface InstalledMod {
   iconUrl: string | null
   versionNumber: string | null
   matched: boolean
+  metadata: ContentMetadata | null
+  metadataReason: string | null
 }
 
 export interface InstalledContentResult {
@@ -539,6 +1003,7 @@ export interface ModInstallResult {
     filename: string
   }>
   skipped: string[]
+  warnings: string[]
 }
 
 export type ModRetargetStatus = 'ready' | 'compatible' | 'blocked'
@@ -577,6 +1042,110 @@ export interface ModpackInstallResult {
   }
 }
 
+export interface ModpackInspection {
+  kind: 'mrpack' | 'prism'
+  path: string
+  name: string
+  minecraftVersion: string
+  loader: { type: string; version: string | null }
+  files: number
+  overrides: number
+  modes: Array<'copy' | 'adopt'>
+  sourceDir?: string
+}
+
+export interface ModpackImportSubmission {
+  job: DownloadJob
+  info: ModpackInspection
+}
+
+export type LauncherId = 'vanilla' | 'prism' | 'multimc' | 'curseforge' | 'atlauncher'
+
+export interface LauncherProfileCandidate {
+  id: string
+  launcher: LauncherId
+  launcherName: string
+  path: string
+  sourceDir: string
+  name: string
+  minecraftVersion: string
+  loader: { type: string; version: string | null }
+  modes: Array<'copy' | 'adopt'>
+  mods: number
+  worlds: number
+  files: number
+  bytes: number
+  sizeCapped: boolean
+}
+
+export interface LauncherScanResult {
+  candidates: LauncherProfileCandidate[]
+  roots: Array<{ launcher: LauncherId; path: string; kind: string }>
+  errors: string[]
+}
+
+export interface LauncherImportProfileResult {
+  candidateId: string
+  installationId: string
+  name: string
+  launcher: LauncherId
+  minecraftVersion: string
+  loader: { type: string; version: string | null }
+  mode: 'copy' | 'adopt'
+  files: number
+  bytes: number
+  warnings: string[]
+  installJob: string | null
+}
+
+export interface LauncherImportFailure {
+  candidateId: string
+  name: string
+  launcher: LauncherId
+  minecraftVersion: string
+  error: string
+}
+
+export interface LauncherImportResult {
+  imported: LauncherImportProfileResult[]
+  failed: LauncherImportFailure[]
+}
+
+export interface LauncherImportSubmission {
+  job: DownloadJob
+  candidates: LauncherProfileCandidate[]
+}
+
+export interface ModpackExportFile {
+  path: string
+  kind: 'download' | 'override' | 'world'
+  size: number
+  projectId: string | null
+  versionId: string | null
+}
+
+export interface ModpackExportPreview {
+  name: string
+  versionId: string
+  minecraftVersion: string
+  loader: { type: string; version: string | null }
+  includeWorlds: boolean
+  downloadable: number
+  downloadableBytes: number
+  bundled: number
+  bundledBytes: number
+  worldFiles: number
+  worldBytes: number
+  totalBytes: number
+  warnings: string[]
+  files: ModpackExportFile[]
+}
+
+export interface ModpackExportResult extends ModpackExportPreview {
+  path: string
+  filename: string
+}
+
 export interface WorldSummary {
   folder: string
   name: string
@@ -598,6 +1167,10 @@ export interface WorldBackup {
   createdAt: string
   sizeBytes: number
   note: string | null
+  pinned?: boolean
+  automatic?: boolean
+  contentHash?: string | null
+  lastBackupAt?: string | null
 }
 
 export interface WorldsResult {
@@ -622,8 +1195,26 @@ export interface ServerEntry {
   address: string
   connectAddress: string
   edition: ServerEdition
+  /** The Java profile this server launches with, or null for the active one. */
+  installationId: string | null
   addedAt: string
   lastJoinedAt: string | null
+}
+
+export interface LanWorld {
+  id: string
+  motd: string
+  port: number
+  sourceAddress: string
+  /** The address passed to Quick Play; always localhost. */
+  address: string
+  lastSeenAt: string
+}
+
+export interface LanDiscoverySnapshot {
+  worlds: LanWorld[]
+  listening: boolean
+  error: string | null
 }
 
 export interface ServerStatus {
@@ -634,6 +1225,8 @@ export interface ServerStatus {
   motd: string | null
   version: string | null
   protocol: number | null
+  /** The server advertises Forge or NeoForge mod metadata. */
+  modded?: boolean
   players: {
     online: number
     max: number

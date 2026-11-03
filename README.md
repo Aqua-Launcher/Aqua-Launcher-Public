@@ -16,11 +16,12 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Dashboard** with the active installation, player profile, live launcher status, recent sessions, and a single Play action.
 - **Accounts** for offline profiles and Microsoft sign-in. Microsoft refresh tokens are encrypted with the operating system credential store (Windows DPAPI, macOS Keychain, or the system keyring); if encryption is unavailable, sessions stay in memory only.
 - **Installations** that can be created, renamed, duplicated, edited, and deleted. Deleting an installation removes the profile entry but keeps its game directory, worlds, and downloaded files on disk.
-- **Version browser** with releases, snapshots, search, and version metadata from Mojang's manifest.
+- **Edition-aware version browser** in **New installation**: Minecraft releases and snapshots, Microsoft's published Bedrock builds, and Horizon releases, each searchable and filtered, with the metadata Aqua needs to install it.
 - **Worlds & backups** for every installation, with world icons, game mode, last-played time, folder sizes, one-click ZIP backups, non-destructive restores, and world deletion. Backups live in the launcher data folder, so they survive profile edits.
 - **Server list** with saved addresses, live status checks, quick refresh, and one-click joins: Java servers use Server List Ping and Quick Play, while Bedrock servers are queried over RakNet and opened through Minecraft's `minecraft://` deep link. Each saved server remembers its edition.
+- **Discord Rich Presence** (opt-in): shows the active Java instance, Minecraft version, loader and elapsed time, plus the server address only when a second switch allows it. Discord's Join action opens Aqua's normal confirmation instead of joining silently.
 - **Bedrock Edition (Windows)** support: Aqua finds Minecraft for Windows and Minecraft Preview in the Microsoft Store packages, shows their versions and data folders, launches them, and lists their worlds alongside Java saves.
-- **Bedrock version browser** that lists the builds Microsoft has published to the Store (releases, beta, and preview channels, 500+ builds), downloads the one you pick into the launcher's own folder, and registers it with Windows so it can be played alongside your Store copy.
+- **Bedrock build browser** that lists the builds Microsoft has published to the Store (releases, beta, and preview channels, 500+ builds), downloads the one you pick into the launcher's own folder, and registers or installs it with Windows so it can be played alongside your Store copy.
 - **Horizon (Rust Edition)** support: Aqua installs Horizon's official Rust client itself, provisions the pinned Minecraft and Java files, prepares the game resources with Horizon's bundled preparer, and starts the client directly. No Horizon launcher is involved.
 - **Horizon mod browser**: Aqua reads Horizon's registry index directly, the way Horizon's own launcher does, so the mods, native bundles, and resource packs behind playhorizon.dev/mods can be searched and installed without a browser view. Files are size- and SHA-256-checked, installed into Horizon's own folders, and their `horizon-mods.txt` switches are managed from the launcher.
 - **Mod loaders** for Fabric, Quilt, Forge, and NeoForge. Fabric and Quilt use their official meta profiles; Forge and NeoForge run their own installers into the launcher's Minecraft root. A loader is selected per installation and its profile version is what gets downloaded and launched.
@@ -28,7 +29,10 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Mod updates** via Modrinth's hash lookup: check all installed content at once, update individual files, or update everything, while preserving disabled files.
 - **Launching** with Java detection, Mojang runtime downloads, per-installation memory, JVM and game arguments, custom resolution, and process tracking.
 - **Diagnostics** with the launcher log, per-session game logs, crash reports, filtering, search, copy, open-folder, and export actions.
-- **Settings** for interface scale (80–130%), reduce motion, the ambient dashboard scene, Java runtime, memory, game directory, download concurrency and speed limits, window mode, arguments, startup behavior, and logging.
+- **Settings** for interface scale (80–130%), reduce motion, the ambient dashboard scene, Java runtime, memory, shared Minecraft settings, game directory, download concurrency and speed limits, storage cleanup, window mode, arguments, startup behavior, Discord presence, and logging.
+- **Tasks** page that collects every background job — game downloads, Java runtimes, Horizon installs and native builds, Bedrock packages, storage scans, and launch preparation — with live progress, speed, size, time remaining, cancel, retry, and clear-finished actions.
+- **Shared Minecraft settings** that keep `options.txt`, `optionsof.txt`, `optionsshaders.txt`, and `servers.dat` identical across installations, covering video, audio, controls, language, shaders, and the multiplayer server list.
+- **Mod retargeting** that rewrites a mod's declared Minecraft version range for the selected profile when the jar is otherwise compatible, keeping the original jar for an undo.
 - **First-run setup** that only asks for a player name. Java, memory, folders, and versions use defaults and are configured later from Settings when needed.
 - **Roadmap & docs** page carrying this README and a feature-level view of the roadmap, so what Aqua does and what is planned next can be read inside the launcher instead of on GitHub.
 
@@ -54,6 +58,39 @@ npm run build
 npm start
 ```
 
+## Deep links and CLI
+
+Aqua registers the `aqua://` scheme for launch, join, install and open actions:
+
+```text
+aqua://join?server=play.example.net
+aqua://join?server=play.example.net:25566&edition=java
+aqua://launch?instance=Survival
+aqua://install?pack=fabulously-optimized
+aqua://open?page=stats
+```
+
+The same actions are available from a terminal:
+
+```bash
+aqua launch "Survival"
+aqua join play.example.net --instance "Survival"
+aqua install fabulously-optimized
+aqua status --json
+```
+
+Links and commands are untrusted input: Aqua asks before launching, joining or installing anything. Add `--yes` in CLI scripts to accept the action. A command sent while Aqua is already running is forwarded to that window instead of starting a second copy. `aqua status --json` reports profile names, versions, loaders, pin state and tags only — never tokens, accounts or file paths.
+
+On Windows the protocol is registered per user. Uninstalling removes the app; if Windows keeps a stale `aqua://` entry, clear it under **Settings → Apps → Default apps**, or reinstall Aqua to repair it.
+
+## Discord Rich Presence
+
+Discord presence is **off by default** and never includes account names, UUIDs, file paths, or chat. Enable it under **Settings → Discord presence**; a second switch shares the server address and enables Discord's Join action, which opens Aqua's normal join confirmation.
+
+Presence connects only while a Java game is running, retries quietly when Discord is closed, and clears when the game exits, crashes, or the setting is turned off. Aqua uses Discord's local IPC socket directly, so there is no SDK or extra dependency.
+
+A copy built from source needs its own Discord application: create one at the [Discord Developer Portal](https://discord.com/developers/applications), then start Aqua with `AQUA_DISCORD_CLIENT_ID` set to its Application ID. Without that ID the switches remain inert and Aqua writes a single debug line.
+
 ## Accounts
 
 Aqua supports two account types. **Microsoft sign-in is currently hidden in the UI** while the Azure application is pending Mojang approval, so the app ships with offline profiles only.
@@ -71,13 +108,29 @@ Open **Extra content** for the selected installation to browse Modrinth content 
 
 **Check updates** compares every matched file with its newest compatible Modrinth release. Updates keep disabled files disabled and remove the previous jar after the new one downloads successfully. Modpack profiles are updated by installing a new pack version rather than editing the pack in place.
 
+The wand action on an installed mod **retargets** it to the profile's Minecraft version. Aqua reads the jar's loader metadata (`fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`, or `META-INF/neoforge.mods.toml`), shows which declared Minecraft ranges it can rewrite, and changes only that declaration; the original jar is kept beside it so the change can be undone. Retargeting does not port code across breaking API changes, so a mod can still fail at runtime after conversion — the dialog says so before it converts anything.
+
 A vanilla installation shows a prompt to add a loader first. Loader changes can be made any time on the installation itself; the profile then needs a fresh download, while worlds and saves are untouched.
+
+## Importing from another launcher
+
+**Installations → Import launcher** scans the standard folders for the vanilla Minecraft launcher, Prism Launcher, MultiMC, CurseForge and ATLauncher, plus any folder you choose. Each profile shows its Minecraft version, loader, mod count, worlds and size, and you can import all of them or only the ones you want.
+
+**Adopt in place** is the default: Aqua points at the existing game folder, so worlds, mods and configs stay where they are and nothing is copied. **Copy into Aqua** creates a separate game folder and copies mods, configs and (optionally) worlds while skipping shared `libraries`, `assets`, `versions`, caches and launcher metadata. Aqua downloads the Minecraft and loader files it needs into its own folder, so neither mode moves or rewrites the source launcher. Duplicate names get a numeric suffix, and a failed profile is removed without touching the source or the profiles already imported.
+
+CurseForge profiles are read from their local `minecraftinstance.json`; the CurseForge API is not used. ATLauncher profiles are read-only.
+
+## Shared Minecraft settings
+
+**Settings → Minecraft settings** keeps one copy of the files Minecraft itself writes for client settings: `options.txt` (video, audio, controls, and language), `optionsof.txt` and `optionsshaders.txt` (modded video and shader selection), and `servers.dat` (the multiplayer list). Mod configs, resource packs, worlds, and saves are never copied.
+
+**Save from <installation>** copies the current files out of that profile, **Apply here** writes them into the selected profile, and **Apply to all** writes them into every Java installation. With **Share settings between installations** on, Aqua also applies the shared copy before each Java launch and captures it again when the game closes, so a change made in game reaches the next profile you start. The files live in `minecraft-settings/` in the launcher data folder, and the panel lists what is stored and when it was last saved.
 
 ## Bedrock Edition
 
 Minecraft for Windows and Minecraft Preview are detected through their Microsoft Store packages (`Get-AppxPackage`), which also supply the version, the package family name, and the app id used to start the game. Both the current GDK data layout (`%APPDATA%\Minecraft Bedrock\Users\<id>\games\com.mojang`) and the older UWP one (`%LOCALAPPDATA%\Packages\Microsoft.MinecraftUWP_8wekyb3d8bbwe\LocalState\games\com.mojang`) are probed, newest first, so the launcher finds the folder the game is actually using.
 
-**Installations** splits into Java and Bedrock tabs, the same way **Versions** does. The Bedrock tab lists every edition Windows has registered for this account plus every build downloaded into the launcher's folder, with the counts shown on the tab; a downloaded build that is the installed one is marked **Registered** and cannot be deleted while Windows runs it.
+**Installations** filters by **All**, **Java**, **Bedrock**, and **Horizon**, and **New installation** picks the edition. The Bedrock filter lists every edition Windows has registered for this account plus every build downloaded into the launcher's folder, with the counts shown on the filter; a downloaded build that is the installed one is marked **Registered** and cannot be deleted while Windows runs it.
 
 From **Installations → Bedrock Edition** you can launch the edition, open its data folder, or jump to its worlds. The dashboard also lists detected editions for one-click launching. Bedrock keeps its own account and world data, so Java-only controls such as loaders, memory, Java runtimes, and Modrinth content do not apply to it.
 
@@ -89,7 +142,7 @@ Bedrock is started by Windows rather than by the launcher, so it has no process,
 
 ### Other Bedrock versions
 
-**Versions → Bedrock Edition** lists the builds that have been published to the Microsoft Store, so you can play an older or newer one than the copy the Store installed. The version list is community-maintained and holds Microsoft's own package links ([ddf8196/mc-w10-versiondb-auto-update](https://github.com/ddf8196/mc-w10-versiondb-auto-update) for the UWP-era APPX builds, [MinecraftBedrockArchiver/GdkLinks](https://github.com/MinecraftBedrockArchiver/GdkLinks) for the current MSIXVC ones). Aqua merges both, caches them for six hours, and resolves the actual download URL through Microsoft's update service (`fe3.delivery.mp.microsoft.com`) for APPX entries.
+**New installation → Bedrock Edition** lists the builds that have been published to the Microsoft Store, so you can play an older or newer one than the copy the Store installed. The version list is community-maintained and holds Microsoft's own package links ([ddf8196/mc-w10-versiondb-auto-update](https://github.com/ddf8196/mc-w10-versiondb-auto-update) for the UWP-era APPX builds, [MinecraftBedrockArchiver/GdkLinks](https://github.com/MinecraftBedrockArchiver/GdkLinks) for the current MSIXVC ones). Aqua merges both, caches them for six hours, and resolves the actual download URL through Microsoft's update service (`fe3.delivery.mp.microsoft.com`) for APPX entries.
 
 Choosing **Download** streams the package into `bedrock/downloads/` and unpacks it into `bedrock/versions/<version>/` — the launcher's own folder, never the Store's install directory. Two package shapes are supported:
 
@@ -104,7 +157,7 @@ Older builds (1.9.x and the 2015-era previews) also declare framework packages t
 
 Each download is roughly 0.9–1.2 GB, plus the same again once unpacked.
 
-When Windows reports no Store edition but the launcher still has builds downloaded, **Installations** lists them with **Register build** (APPX) or **Install build** (MSIXVC), **Open folder**, and **Remove**, so a swapped or deleted registration can be restored without downloading anything again. Both Bedrock pages lead with a **Downloaded builds** strip, so a build that is older than the first page of the catalog still has its action in reach.
+When Windows reports no Store edition but the launcher still has builds downloaded, **Installations** lists them with **Register build** (APPX) or **Install build** (MSIXVC), **Open folder**, and **Remove**, so a swapped or deleted registration can be restored without downloading anything again. The Bedrock list and the build picker both lead with a **Downloaded builds** strip, so a build that is older than the first page of the catalog still has its action in reach.
 
 ### Bedrock add-ons
 
@@ -180,7 +233,7 @@ The dashboard background itself prefers the version's own update art. Aqua fetch
 
 ## Data locations
 
-Aqua stores its data in Electron's per-user application data directory:
+By default, Aqua stores its data in Electron's per-user application data directory:
 
 | Platform | Directory |
 | --- | --- |
@@ -198,13 +251,28 @@ Inside that folder:
 - `logs/launcher.log` and `logs/game/` — launcher and game output
 - `backups/<installation>/` — world backup archives and their index
 - `bedrock/versions/<version>/` and `bedrock/downloads/` — downloaded Bedrock builds and their temporary packages
+- `minecraft-settings/` — shared `options*.txt` and `servers.dat`
+- `horizon/` — Horizon builds, game home, worlds, downloads, and the native toolchain
+- `cache/artwork/` — dashboard version artwork, so it still appears offline
+
+### Portable mode
+
+Pass `--portable` or put an empty `portable.txt` next to `Aqua Launcher.exe` to keep everything beside the executable instead of in AppData. Aqua creates `AquaData/` there and points its data, session data, Electron logs, crash dumps and default downloads at it before the single-instance lock is taken. The About page shows the active data folder and a **Portable** badge.
+
+Portable mode never registers the `aqua://` protocol or a login-at-startup entry, so Windows gets no registry writes from the launcher. If the folder is read-only, Aqua shows a clear error and starts with the normal AppData location instead of crashing. Updates are manual: replace the folder when a new build is ready. A drive that disappears while Aqua is running can still interrupt a write, but settings and profile saves use same-folder temporary files and atomic renames, so the previous config remains readable on the next launch.
 
 Custom game directories are validated against drive roots and protected system locations such as `C:\Windows` and `Program Files`.
+
+## Accessibility
+
+Aqua is keyboard-operable from the titlebar to every page: use `Tab`/`Shift+Tab` to move, `Enter` or `Space` to activate, and `Escape` to close dialogs, drawers and the command palette. A **Skip to content** link appears on keyboard focus, `Ctrl+K` opens search, and dialogs return focus to the control that opened them. Page changes and completed background jobs are announced through polite live regions, and toasts use the same pattern.
+
+**Settings → Display** adds **High contrast**, **Reduce transparency** and **Reduce motion**. High contrast switches to an opaque black palette with stronger text and borders; reduce transparency removes frosted chrome; reduce motion stops CSS animations and transitions, and Aqua also honours the operating system's `prefers-reduced-motion` setting. Icon-only controls have labels, and primary controls use at least 32×32 px hit targets with visible focus rings.
 
 ## Development
 
 ```bash
-npm test         # Node test runner: rules, arguments, paths, worlds, servers, Bedrock, settings
+npm test         # Node test runner: rules, paths, worlds, servers, Bedrock, Horizon, docs, settings
 npm run typecheck
 npm run build
 npm run icons    # regenerate app icons from scripts/generate-icons.mjs
@@ -230,13 +298,16 @@ electron/
     bedrock-addons.js    Bedrock pack parsing, import/remove, add-on listing
     horizon.js          Horizon release install, preparation, and direct Rust client launch
     addon-browser.js     in-app add-on browser policy and download-to-import bridge
+    minecraft-settings.js  shared options.txt/optionsof.txt/optionsshaders.txt/servers.dat
+    mod-retarget.js      rewrites a mod's declared Minecraft range, with undo
+    doc-images.js        fetches README and ROADMAP images for the Docs page
     java.js           Java detection and Mojang runtime provisioning
     game.js           launch construction, process tracking, crash capture
     logs.js           launcher/game log reading and exports
     settings.js       defaults and validation
     store.js          atomic JSON persistence
 src/
-  pages/              Home, Installations, Worlds, Servers, Versions, Extra content, Account, Logs, Roadmap & docs, Settings
+  pages/              Home, Installations, Tasks, Worlds, Servers, Extra content, Account, Logs, Roadmap & docs, Settings
   components/         layout, dialogs, overlays, bedrock, design-system primitives
   state/              launcher provider and renderer state
   lib/                IPC API, types, formatting helpers
@@ -268,4 +339,5 @@ This builds the renderer and uses `electron-builder` to produce an installer in 
 - Downloaded Bedrock builds are unofficial copies of Store packages: APPX builds need Developer Mode (with an administrator prompt as the fallback) to register, MSIXVC builds are installed through Windows and replace the current copy, and the Store can overwrite either on its next update. Only use builds you are entitled to play.
 - Older Bedrock builds that Microsoft has delisted can still be listed, but their packages are no longer served, so downloading them fails with a clear message.
 - Builds that depend on frameworks Windows 11 no longer ships only register once those requirements are dropped from their manifest, and any Store feature backed by that framework stops working.
+- Mod retargeting changes only the declared Minecraft version range. A mod whose code depends on APIs that changed still needs its own updated release.
 - The Play target is remembered for the running session only; the launcher starts on the active Java installation again after a restart.

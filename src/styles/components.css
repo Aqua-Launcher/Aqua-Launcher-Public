@@ -212,8 +212,8 @@
 }
 
 .icon-btn--sm {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
 }
 
 .icon-btn--sm svg {
@@ -394,6 +394,14 @@
   transition:
     background var(--transition),
     border-color var(--transition);
+}
+
+/* The visual track is compact, but the switch still gets a 32px touch target. */
+.switch::before {
+  position: absolute;
+  inset: -5px -3px;
+  content: '';
+  border-radius: 999px;
 }
 
 .switch::after {
@@ -700,7 +708,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
+  height: 32px;
   padding: 0 12px;
   border-radius: 8px;
   border: 1px solid var(--line);

@@ -120,7 +120,7 @@ html[data-custom-theme='true'] .titlebar {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
+  height: 32px;
   padding: 0 9px 0 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -406,7 +406,7 @@ html[data-custom-theme='true'] .titlebar {
 
 .theme-color__input {
   width: 34px;
-  height: 30px;
+  height: 32px;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--line-strong);

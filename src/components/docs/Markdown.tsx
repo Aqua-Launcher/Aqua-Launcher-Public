@@ -1,9 +1,91 @@
-import { useMemo, type ReactNode } from 'react'
-import { api, getErrorMessage } from '../../lib/api'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { api, getErrorMessage, isDesktop } from '../../lib/api'
 import { badgeLabel, parseMarkdown } from '../../lib/markdown'
 import { useLauncher } from '../../state/LauncherProvider'
 
 const INLINE_SOURCE = '(`[^`]+`|\\*\\*[^*]+\\*\\*|!\\[[^\\]]*\\]\\([^)]+\\)|\\[[^\\]]+\\]\\([^)]+\\))'
+const REMOTE_IMAGE = /^https?:\/\//i
+
+/** Fetched images stay loaded when the README tab is left and reopened. */
+const imageCache = new Map<string, Promise<string>>()
+
+function useDocImage(src: string): { url: string | null; failed: boolean } {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setUrl(null)
+    setFailed(false)
+
+    // Local and data URLs already satisfy the renderer's CSP. Remote images go
+    // through the main process so the page keeps its narrow img-src policy and
+    // the fetch is still cached when it has been read once.
+    if (!REMOTE_IMAGE.test(src)) {
+      setUrl(src)
+      return () => {
+        active = false
+      }
+    }
+    if (!isDesktop) {
+      setFailed(true)
+      return () => {
+        active = false
+      }
+    }
+    let pending = imageCache.get(src)
+    if (!pending) {
+      pending = api.docs.image(src)
+      imageCache.set(src, pending)
+    }
+    pending
+      .then((dataUrl) => {
+        if (active) setUrl(dataUrl)
+      })
+      .catch(() => {
+        imageCache.delete(src)
+        if (active) setFailed(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [src])
+
+  return { url, failed }
+}
+
+/**
+ * One image from a document. A missing image falls back to its badge text or alt
+ * text so the page still says what was meant to be there.
+ */
+function DocImage({
+  src,
+  alt,
+  width,
+  className,
+}: {
+  src: string
+  alt: string
+  width?: string | null
+  className?: string
+}) {
+  const { url, failed } = useDocImage(src)
+
+  if (failed) {
+    const badge = badgeLabel(src, alt)
+    return <span className={badge ? 'md-badge' : 'md-image-fallback'}>{badge || alt || src}</span>
+  }
+  if (!url) return <span className="md-image-loading" aria-hidden="true" />
+  return (
+    <img
+      className={className || 'md-image'}
+      src={url}
+      alt={alt}
+      loading="lazy"
+      style={width ? { width } : undefined}
+    />
+  )
+}
 
 /**
  * Renders the inline slice of Markdown used by the launcher's documents: code
@@ -41,13 +123,16 @@ function renderInline(text: string, onLink: (url: string) => void, depth = 0): R
     }
     const [, bang, label, url] = link
     if (bang) {
-      // Remote images are blocked by the launcher's CSP, so a badge becomes a pill
-      // with the text the shield would have drawn.
+      // Technology badges stay compact pills; every other image is rendered.
       const badge = badgeLabel(url, label)
       nodes.push(
-        <span className="md-badge" key={key}>
-          {badge || label}
-        </span>,
+        badge ? (
+          <span className="md-badge" key={key}>
+            {badge}
+          </span>
+        ) : (
+          <DocImage key={key} src={url} alt={label} className="md-image md-image--inline" />
+        ),
       )
       continue
     }
@@ -153,6 +238,15 @@ export function Markdown({ source }: { source: string }) {
               <blockquote className="md-quote" key={index}>
                 {renderInline(block.text, openLink)}
               </blockquote>
+            )
+          case 'image':
+            return (
+              <figure
+                className={`md-figure${block.align === 'center' ? ' md-figure--center' : ''}`}
+                key={index}
+              >
+                <DocImage src={block.src} alt={block.alt} width={block.width} />
+              </figure>
             )
           case 'rule':
             return <hr className="md-rule" key={index} />

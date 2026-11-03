@@ -9,8 +9,10 @@ import {
   type ReactNode,
 } from 'react'
 import { api, getErrorMessage, type EventPayloadMap } from '../lib/api'
+import { analyzeServerCompatibility, type JoinWarningState } from '../lib/serverCompatibility'
 import type {
   ActivityEntry,
+  AppNotification,
   AuthMode,
   AuthState,
   BedrockCatalog,
@@ -29,6 +31,7 @@ import type {
   InstallationInput,
   JavaInfo,
   LaunchErrorState,
+  LinkIntent,
   PageName,
   RouteState,
   ServerEdition,
@@ -75,6 +78,12 @@ interface LauncherContextValue {
   toasts: Toast[]
   pushToast: (toast: Omit<Toast, 'id'>) => void
   dismissToast: (id: string) => void
+  notifications: AppNotification[]
+  markNotificationsRead: (ids?: string[]) => Promise<void>
+  clearNotifications: () => Promise<void>
+  /** A validated external link or CLI action waiting for confirmation. */
+  linkIntent: LinkIntent | null
+  dismissLinkIntent: () => void
   /** The Horizon client install that has run this session, while it is known. */
   horizonInstallJob: HorizonInstallJob | null
   /** The Rust build that compiles Horizon's native mods into the game. */
@@ -130,12 +139,24 @@ interface LauncherContextValue {
     options?: { ignoreMissingDependencies?: boolean },
   ) => Promise<void>
   play: (installationId: string, options?: { keepTarget?: boolean }) => Promise<void>
-  joinServer: (serverId: string, address: string, edition?: ServerEdition) => Promise<boolean>
-  launchGame: (installationId: string) => Promise<void>
+  joinServer: (
+    serverId: string | null,
+    address: string,
+    edition?: ServerEdition,
+    options?: { installationId?: string | null; serverName?: string; skipWarnings?: boolean },
+  ) => Promise<boolean>
+  /** Set when a join has avoidable compatibility warnings; the dialog owns the retry. */
+  joinWarning: JoinWarningState | null
+  confirmJoin: () => Promise<void>
+  dismissJoinWarning: () => void
+  launchGame: (installationId: string, options?: { safeMode?: boolean }) => Promise<void>
   installGame: (installationId: string) => Promise<DownloadJob | null>
   retryLaunch: () => Promise<void>
   createInstallation: (input: InstallationInput) => Promise<Installation>
   updateInstallation: (id: string, patch: Record<string, unknown>) => Promise<Installation>
+  /** Pin, tags and colour changes skip the generic update toast. */
+  updateInstallationMeta: (id: string, patch: Record<string, unknown>) => Promise<Installation>
+  reorderInstallations: (ids: string[]) => Promise<void>
   duplicateInstallation: (id: string) => Promise<Installation | null>
   deleteInstallation: (id: string) => Promise<void>
   refreshInstallations: () => Promise<void>
@@ -184,6 +205,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [horizonTarget, setHorizonTarget] = useState<HorizonBuild | null>(null)
   const [launchingHorizonTag, setLaunchingHorizonTag] = useState<string | null>(null)
   const [route, setRoute] = useState<RouteState>({ page: 'home' })
+  const [linkIntent, setLinkIntent] = useState<LinkIntent | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [horizonInstallJob, setHorizonInstallJob] = useState<HorizonInstallJob | null>(null)
   const [horizonNativeJob, setHorizonNativeJob] = useState<HorizonNativeJob | null>(null)
@@ -193,6 +215,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   const [authInitialMode, setAuthInitialMode] = useState<AuthMode | null>(null)
   const [launchError, setLaunchError] = useState<LaunchErrorState | null>(null)
   const [launchingId, setLaunchingId] = useState<string | null>(null)
+  const [joinWarning, setJoinWarning] = useState<JoinWarningState | null>(null)
   const [pendingLaunch, setPendingLaunch] = useState<PendingLaunch | null>(null)
   const [windowMaximized, setWindowMaximized] = useState(false)
   const [storageProgress, setStorageProgress] = useState<StorageProgress | null>(null)
@@ -241,6 +264,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     root.dataset.rounding = 'rounded'
     root.dataset.depth = 'false'
     root.dataset.reduceMotion = String(settings.reduceMotion)
+    root.dataset.contrast = settings.highContrast ? 'high' : 'normal'
+    root.dataset.transparency = settings.reduceTransparency ? 'reduced' : 'normal'
     root.dataset.ambient = String(settings.ambient)
   }, [])
 
@@ -398,6 +423,16 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           })
           break
         }
+        case 'notifications': {
+          const payload = event.payload as EventPayloadMap['notifications']
+          setData((current) => (current ? { ...current, notifications: payload } : current))
+          break
+        }
+        case 'app:route': {
+          const payload = event.payload as EventPayloadMap['app:route']
+          setLinkIntent(payload.intent)
+          break
+        }
         case 'bedrock-versions': {
           const payload = event.payload as EventPayloadMap['bedrock-versions']
           setBedrockDownloads((current) => ({ ...current, [payload.version]: payload }))
@@ -429,6 +464,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
           break
       }
     })
+    // The main process holds routed links until this subscription exists.
+    void api.rendererReady().catch(() => {})
     void loadBootstrap()
     return () => {
       unsubscribe()
@@ -467,6 +504,18 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     setRoute({ page, params })
   }, [])
 
+  const dismissLinkIntent = useCallback(() => setLinkIntent(null), [])
+
+  const markNotificationsRead = useCallback(async (ids?: string[]) => {
+    const next = await api.notifications.markRead(ids ?? null)
+    setData((current) => (current ? { ...current, notifications: next } : current))
+  }, [])
+
+  const clearNotifications = useCallback(async () => {
+    const next = await api.notifications.clear()
+    setData((current) => (current ? { ...current, notifications: next } : current))
+  }, [])
+
   const openInstallDialog = useCallback((state?: Partial<InstallDialogState>) => {
     setInstallDialog({
       mode: state?.mode || 'create',
@@ -490,13 +539,13 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const launchGame = useCallback(
-    async (installationId: string) => {
+    async (installationId: string, options: { safeMode?: boolean } = {}) => {
       const current = dataRef.current
       const installation = current?.installations.find((item) => item.id === installationId)
       setLaunchingId(installationId)
       setLaunchError(null)
       try {
-        await api.game.launch(installationId)
+        await api.game.launch(installationId, null, options.safeMode === true)
       } catch (error) {
         setLaunchError({
           title: 'Minecraft could not start',
@@ -716,7 +765,12 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   )
 
   const joinServer = useCallback(
-    async (serverId: string, address: string, edition: ServerEdition = 'java') => {
+    async (
+      serverId: string | null,
+      address: string,
+      edition: ServerEdition = 'java',
+      options: { installationId?: string | null; serverName?: string; skipWarnings?: boolean } = {},
+    ) => {
       if (edition === 'bedrock') {
         const target = bedrock?.editions[0] ?? null
         if (!target) {
@@ -729,7 +783,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         }
         try {
           await api.bedrock.launch(target.id, address)
-          await api.servers.markJoined(serverId)
+          if (serverId) await api.servers.markJoined(serverId)
           pushToast({ level: 'success', title: `Joining ${address}`, message: `${target.name} is connecting.` })
           return true
         } catch (error) {
@@ -739,8 +793,12 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       }
       const current = dataRef.current
       if (!current) return false
-      const installation =
+      const boundId =
+        typeof options.installationId === 'string' && options.installationId ? options.installationId : null
+      const bound = boundId ? current.installations.find((item) => item.id === boundId) || null : null
+      const active =
         current.installations.find((item) => item.isActive) || current.installations[0] || null
+      const installation = bound || active
       if (!installation) {
         pushToast({
           level: 'info',
@@ -765,7 +823,9 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         })
         return false
       }
-      if (!current.accounts.activeAccountId) {
+      const account =
+        current.accounts.accounts.find((item) => item.id === current.accounts.activeAccountId) ?? null
+      if (!account) {
         setAuthOpen(true)
         pushToast({
           level: 'info',
@@ -774,11 +834,43 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
         })
         return false
       }
+      if (!options.skipWarnings) {
+        let status = null
+        try {
+          // Version and modded checks come from the status ping. Keep this short:
+          // an offline server should not make joining feel frozen.
+          status = await api.servers.ping(address, 'java', 2500)
+        } catch {
+          // Joining can still succeed when status is blocked; the game is the
+          // final authority and the existing launch errors still apply.
+        }
+        const compatibility = analyzeServerCompatibility({
+          server: { edition: 'java', installationId: boundId },
+          installation,
+          accountType: account.type,
+          status,
+          usedFallback: Boolean(boundId && !bound),
+        })
+        if (compatibility.issues.length) {
+          setJoinWarning({
+            serverId,
+            serverName: options.serverName?.trim() || address,
+            address,
+            edition,
+            installationId: boundId,
+            installationName: installation.name,
+            serverVersion: compatibility.serverVersion,
+            instanceVersion: compatibility.instanceVersion,
+            issues: compatibility.issues,
+          })
+          return false
+        }
+      }
       setLaunchingId(installation.id)
       setLaunchError(null)
       try {
         const launched = await api.game.launch(installation.id, address)
-        await api.servers.markJoined(serverId)
+        if (serverId) await api.servers.markJoined(serverId)
         if (launched.quickJoinSupported === false) {
           pushToast({
             level: 'info',
@@ -807,6 +899,19 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     },
     [bedrock, pushToast, refreshInstallations],
   )
+
+  const confirmJoin = useCallback(async () => {
+    const pending = joinWarning
+    if (!pending) return
+    setJoinWarning(null)
+    await joinServer(pending.serverId, pending.address, pending.edition, {
+      installationId: pending.installationId,
+      serverName: pending.serverName,
+      skipWarnings: true,
+    })
+  }, [joinServer, joinWarning])
+
+  const dismissJoinWarning = useCallback(() => setJoinWarning(null), [])
 
   const installGame = useCallback(
     async (installationId: string) => {
@@ -943,6 +1048,15 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     },
     [pushToast],
   )
+
+  const updateInstallationMeta = useCallback(
+    async (id: string, patch: Record<string, unknown>) => api.installations.update(id, patch),
+    [],
+  )
+
+  const reorderInstallations = useCallback(async (ids: string[]) => {
+    await api.installations.reorder(ids)
+  }, [])
 
   const duplicateInstallation = useCallback(
     async (id: string) => {
@@ -1132,6 +1246,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   )
 
   const settings = data?.settings ?? null
+  const notifications = data?.notifications ?? []
   const installations = data?.installations ?? []
   const accounts = data?.accounts ?? null
   const activeAccount = accounts?.accounts.find((account) => account.isActive) || null
@@ -1182,6 +1297,11 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       toasts,
       pushToast,
       dismissToast,
+      notifications,
+      markNotificationsRead,
+      clearNotifications,
+      linkIntent,
+      dismissLinkIntent,
       horizonInstallJob,
       horizonNativeJob,
       installDialog,
@@ -1226,11 +1346,16 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       installBedrockVersion,
       play,
       joinServer,
+      joinWarning,
+      confirmJoin,
+      dismissJoinWarning,
       launchGame,
       installGame,
       retryLaunch,
       createInstallation,
       updateInstallation,
+      updateInstallationMeta,
+      reorderInstallations,
       duplicateInstallation,
       deleteInstallation,
       refreshInstallations,
@@ -1287,12 +1412,20 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       installDialog,
       installGame,
       installations,
+      linkIntent,
+      dismissLinkIntent,
       javaError,
       javaLoading,
       javas,
       jobs,
       joinServer,
+      joinWarning,
+      confirmJoin,
+      dismissJoinWarning,
       launchBedrock,
+      markNotificationsRead,
+      clearNotifications,
+      notifications,
       launchError,
       launchGame,
       launchHorizon,
@@ -1330,6 +1463,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       switchAccount,
       toasts,
       updateInstallation,
+      updateInstallationMeta,
+      reorderInstallations,
       versions,
       versionsError,
       versionsLoading,

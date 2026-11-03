@@ -149,7 +149,7 @@ test('markdown blocks cover headings, lists, code, tables and quotes', () => {
 test('the README renders as blocks without a Markdown dependency', () => {
   const blocks = parseMarkdown(readDoc('README.md'))
   const kinds = new Set(blocks.map((block) => block.kind))
-  for (const kind of ['heading', 'paragraph', 'list', 'code', 'table']) {
+  for (const kind of ['heading', 'paragraph', 'list', 'code', 'table', 'image']) {
     assert.ok(kinds.has(kind), `the README should produce ${kind} blocks`)
   }
   for (const block of blocks) {
@@ -157,6 +157,28 @@ test('the README renders as blocks without a Markdown dependency', () => {
     assert.ok(!text.includes('```'), 'fence markers never reach the rendered text')
     assert.ok(!text.includes('|---'), 'table separator rows are dropped')
   }
+})
+
+test('the README banner and Markdown images become image blocks', () => {
+  const blocks = parseMarkdown(
+    [
+      '<p align="center">',
+      '  <img src="https://aqua.ch1n.dev/assets/og.jpg" alt="Aqua Website" width="100%">',
+      '</p>',
+      '',
+      'A paragraph with ![a badge](https://img.shields.io/badge/Electron-45-2b2e3a) inline.',
+    ].join('\n'),
+  )
+
+  assert.deepEqual(blocks[0], {
+    kind: 'image',
+    src: 'https://aqua.ch1n.dev/assets/og.jpg',
+    alt: 'Aqua Website',
+    width: '100%',
+    align: 'center',
+  })
+  assert.equal(blocks[1].kind, 'paragraph')
+  assert.match(blocks[1].text, /!\[a badge\]\(https:\/\/img\.shields\.io/)
 })
 
 test('shields badges become the text they would have drawn', () => {

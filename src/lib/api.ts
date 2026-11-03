@@ -1,5 +1,6 @@
 import type {
   AccountsState,
+  AppNotification,
   ActivityEntry,
   AuthState,
   Bootstrap,
@@ -21,6 +22,11 @@ import type {
   Installation,
   JavaInfo,
   JavaRuntimeOption,
+  LanDiscoverySnapshot,
+  LauncherImportSubmission,
+  LauncherScanResult,
+  LinkIntent,
+  LinkStatus,
   LoaderType,
   LoaderTypeOption,
   LoaderVersion,
@@ -31,6 +37,10 @@ import type {
   MinecraftSettingsSyncResult,
   ModInstallResult,
   ModpackInstallResult,
+  ModpackImportSubmission,
+  ModpackInspection,
+  ModpackExportPreview,
+  ModpackExportResult,
   ModRetargetAnalysis,
   ModrinthContentType,
   ModrinthSearchResult,
@@ -45,21 +55,33 @@ import type {
   BedrockRegistrationResult,
   BedrockStatus,
   BlockTextureSet,
+  ContentFilterEnvironment,
+  ContentFilterSort,
+  ContentImportRequest,
+  ContentImportResult,
+  DashboardBackground,
   BedrockVersionsState,
   BedrockWorldBackup,
   BedrockWorldRestoreResult,
   BedrockWorldsResult,
+  CrashAnalysis,
+  CrashRecord,
   ServerEdition,
   ServerEntry,
   ServerStatus,
   SessionEntry,
   Settings,
+  PlaytimeStats,
+  StatsExportResult,
+  ScreenshotList,
+  ScreenshotThumbnail,
   StorageCleanResult,
   StorageProgress,
   StorageScan,
   VersionArtwork,
   VersionManifest,
   WorldBackup,
+  WorldSearchEntry,
   WorldRestoreResult,
   WorldsResult,
 } from './types'
@@ -67,7 +89,17 @@ import type {
 export interface AquaApi {
   bootstrap: () => Promise<Bootstrap>
   openExternal: (url: string) => Promise<boolean>
+  files: {
+    /** Resolves a dropped File to its absolute path in the preload process. */
+    getPath: (file: File) => string
+  }
   reportRendererError: (payload: { message: string; stack?: string }) => Promise<boolean>
+  /** Tells the main process the renderer subscription is ready for routed links. */
+  rendererReady: () => Promise<boolean>
+  links: {
+    status: () => Promise<LinkStatus>
+    register: () => Promise<LinkStatus>
+  }
   copyText: (text: string) => boolean
   windowControls: {
     minimize: () => Promise<boolean>
@@ -82,14 +114,35 @@ export interface AquaApi {
   artwork: {
     versionArt: (versionId: string) => Promise<VersionArtwork | null>
   }
+  docs: {
+    /** Reads an image referenced by README.md/ROADMAP.md and returns a data URL. */
+    image: (url: string) => Promise<string>
+  }
+  stats: {
+    summary: () => Promise<PlaytimeStats>
+    exportCsv: () => Promise<StatsExportResult | null>
+  }
+  notifications: {
+    list: () => Promise<AppNotification[]>
+    markRead: (ids?: string[] | null) => Promise<AppNotification[]>
+    clear: () => Promise<AppNotification[]>
+  }
   blockTextures: {
     list: (options?: { force?: boolean }) => Promise<BlockTextureSet>
+  }
+  launcherImport: {
+    scan: (path?: string | null) => Promise<LauncherScanResult>
+    start: (
+      ids: string[],
+      options?: { mode?: 'adopt' | 'copy'; importWorlds?: boolean; path?: string | null },
+    ) => Promise<LauncherImportSubmission>
   }
   installations: {
     list: () => Promise<Installation[]>
     get: (id: string) => Promise<Installation>
     create: (input: Record<string, unknown>) => Promise<Installation>
     update: (id: string, patch: Record<string, unknown>) => Promise<Installation>
+    reorder: (ids: string[]) => Promise<boolean>
     duplicate: (id: string) => Promise<Installation>
     remove: (id: string) => Promise<{ removed: string; gameDir: string }>
     setActive: (id: string) => Promise<Installation>
@@ -98,6 +151,47 @@ export interface AquaApi {
   }
   settings: {
     update: (patch: Partial<Settings>) => Promise<Settings>
+  }
+  screenshots: {
+    list: (installationId: string) => Promise<ScreenshotList>
+    thumbnail: (installationId: string, filename: string, size?: number) => Promise<ScreenshotThumbnail>
+    open: (installationId: string, filename: string) => Promise<string>
+    copy: (installationId: string, filename: string) => Promise<{ filename: string }>
+
+    reveal: (installationId: string, filename: string) => Promise<string>
+    openFolder: (installationId: string) => Promise<string>
+    delete: (installationId: string, filename: string) => Promise<{ filename: string }>
+    setBackground: (
+      installationId: string,
+      filename: string,
+    ) => Promise<{ path: string; settings: Settings }>
+    clearBackground: () => Promise<Settings>
+    background: () => Promise<DashboardBackground>
+  }
+  backups: {
+    status: () => Promise<import('./types').BackupStatus>
+    runNow: (installationId?: string | null) => Promise<unknown>
+  }
+  health: {
+    check: (installationId: string) => Promise<import('./types').HealthResult>
+    summary: () => Promise<import('./types').HealthSummary>
+    fix: (
+      installationId: string,
+      kind: import('./types').HealthFixKind,
+    ) => Promise<{ kind: string; path?: string; route?: string }>
+  }
+  content: {
+    index: (installationId: string, contentType: import('./types').ContentType) => Promise<import('./types').ContentIndexResult>
+    file: (
+      installationId: string,
+      contentType: ModrinthContentType,
+      filename: string,
+    ) => Promise<import('./types').ContentFileDetail>
+    conflicts: (
+      installationId: string,
+      contentType?: ModrinthContentType,
+    ) => Promise<import('./types').ContentConflictsResult>
+    importFiles: (request: ContentImportRequest) => Promise<ContentImportResult>
   }
   minecraftSettings: {
     status: () => Promise<MinecraftSettingsStatus>
@@ -129,33 +223,74 @@ export interface AquaApi {
     search: (
       /** Null is allowed for modpacks, which install as their own profile. */
       installationId: string | null,
-      options?: { query?: string; offset?: number; limit?: number; contentType?: ModrinthContentType },
+      options?: {
+        query?: string
+        offset?: number
+        limit?: number
+        contentType?: ModrinthContentType
+        sort?: ContentFilterSort
+        categories?: string[]
+        environment?: ContentFilterEnvironment
+        license?: string | null
+        openSource?: boolean
+        gameVersion?: string | null
+        loader?: string | null
+      },
     ) => Promise<ModrinthSearchResult>
-    list: (installationId: string, contentType?: ModrinthContentType) => Promise<InstalledContentResult>
+    list: (
+      installationId: string,
+      contentType?: ModrinthContentType,
+      worldFolder?: string | null,
+    ) => Promise<InstalledContentResult>
     install: (
       installationId: string,
       projectId: string,
       versionId?: string | null,
       contentType?: ModrinthContentType,
+      worldFolder?: string | null,
     ) => Promise<ModInstallResult>
     installModpack: (projectId: string, versionId?: string | null) => Promise<ModpackInstallResult>
-    checkUpdates: (installationId: string, contentType?: ModrinthContentType) => Promise<ModUpdatesResult>
+    inspectPack: (path: string) => Promise<ModpackInspection>
+    importPack: (path: string, mode?: 'copy' | 'adopt') => Promise<ModpackImportSubmission>
+    exportPreview: (installationId: string, includeWorlds?: boolean) => Promise<ModpackExportPreview>
+    exportPack: (installationId: string, includeWorlds?: boolean) => Promise<ModpackExportResult | null>
+    checkUpdates: (
+      installationId: string,
+      contentType?: ModrinthContentType,
+      worldFolder?: string | null,
+    ) => Promise<ModUpdatesResult>
     update: (
       installationId: string,
       filename: string,
       versionId: string,
       contentType?: ModrinthContentType,
+      worldFolder?: string | null,
     ) => Promise<ModUpdateResult>
     toggle: (
       installationId: string,
       filename: string,
       contentType?: ModrinthContentType,
+      worldFolder?: string | null,
     ) => Promise<{ filename: string; enabled: boolean }>
-    remove: (installationId: string, filename: string, contentType?: ModrinthContentType) => Promise<{ filename: string }>
+    remove: (
+      installationId: string,
+      filename: string,
+      contentType?: ModrinthContentType,
+      worldFolder?: string | null,
+    ) => Promise<{ filename: string }>
     retargetInfo: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
     retarget: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
     retargetUndo: (installationId: string, filename: string) => Promise<ModRetargetAnalysis>
-    openFolder: (installationId: string, contentType?: ModrinthContentType) => Promise<string>
+    openFolder: (
+      installationId: string,
+      contentType?: ModrinthContentType,
+      worldFolder?: string | null,
+    ) => Promise<string>
+    project: (projectId: string) => Promise<import('./types').ModrinthProjectDetail>
+    versions: (
+      projectId: string,
+      options?: { gameVersion?: string | null; loader?: string | null },
+    ) => Promise<import('./types').ModrinthVersion[]>
   }
   downloads: {
     list: () => Promise<DownloadJob[]>
@@ -171,6 +306,7 @@ export interface AquaApi {
     launch: (
       installationId: string,
       serverAddress?: string | null,
+      safeMode?: boolean,
     ) => Promise<{
       pid: number
       logPath: string
@@ -180,9 +316,16 @@ export interface AquaApi {
       quickJoinSupported?: boolean
     }>
     getState: () => Promise<GameState>
+    recoverSafeMode: () => Promise<{ sessions: unknown[]; restored: number; conflicts: number; pending: boolean }>
+  }
+  crash: {
+    last: () => Promise<CrashRecord | null>
+    list: () => Promise<CrashRecord[]>
+    analyze: (installationId: string, file: string) => Promise<CrashAnalysis | null>
   }
   worlds: {
     list: (installationId: string) => Promise<WorldsResult>
+    searchIndex: () => Promise<WorldSearchEntry[]>
     backup: (installationId: string, folder: string, note?: string | null) => Promise<WorldBackup>
     restore: (installationId: string, backupId: string) => Promise<WorldRestoreResult>
     deleteBackup: (installationId: string, backupId: string) => Promise<{ id: string }>
@@ -190,11 +333,20 @@ export interface AquaApi {
     openFolder: (installationId: string, folder?: string | null) => Promise<string>
   }
   servers: {
+    lan: () => Promise<LanDiscoverySnapshot>
     list: () => Promise<ServerEntry[]>
-    add: (input: { name?: string; address: string; edition?: ServerEdition }) => Promise<ServerEntry>
-    update: (id: string, patch: { name?: string; address?: string }) => Promise<ServerEntry>
+    add: (input: {
+      name?: string
+      address: string
+      edition?: ServerEdition
+      installationId?: string | null
+    }) => Promise<ServerEntry>
+    update: (
+      id: string,
+      patch: { name?: string; address?: string; installationId?: string | null },
+    ) => Promise<ServerEntry>
     remove: (id: string) => Promise<{ id: string; name: string }>
-    ping: (address: string, edition?: ServerEdition) => Promise<ServerStatus>
+    ping: (address: string, edition?: ServerEdition, timeoutMs?: number) => Promise<ServerStatus>
     markJoined: (id: string) => Promise<ServerEntry>
   }
   horizon: {
@@ -276,6 +428,7 @@ export interface AquaApi {
     chooseDirectory: (options?: { title?: string; defaultPath?: string }) => Promise<string | null>
     chooseJava: () => Promise<string | null>
     chooseAddon: () => Promise<string | null>
+    choosePack: () => Promise<string | null>
     chooseHorizonMod: () => Promise<string | null>
   }
   events: {
@@ -308,9 +461,12 @@ export type EventPayloadMap = {
   game: GameState
   auth: AuthState
   notification: { level: 'success' | 'error' | 'info' | 'warning'; title: string; message?: string }
+  notifications: AppNotification[]
+  'app:route': { intent: LinkIntent }
   windowState: { maximized: boolean }
   'bedrock-versions': BedrockDownloadProgress
   'horizon-install': HorizonInstallJob
+  'servers:lan': LanDiscoverySnapshot
   'storage:progress': StorageProgress
   'bedrock-addons': { editionId: string; installed: string[]; filename: string }
   'horizon-native': HorizonNativeJob

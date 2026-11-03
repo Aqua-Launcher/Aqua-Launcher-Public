@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Archive,
   Boxes,
+  Database,
   FolderOpen,
   Globe2,
   HardDrive,
@@ -28,6 +29,7 @@ import type {
 import { PageHeader } from '../components/layout/PageHeader'
 import { Badge, Button, EmptyState, IconButton, Spinner, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
+import { WorldDatapacksDialog } from '../components/worlds/WorldDatapacksDialog'
 
 function titleCase(value: string) {
   return value ? value[0].toUpperCase() + value.slice(1) : value
@@ -60,6 +62,7 @@ export function WorldsPage() {
   const [deleteBackupTarget, setDeleteBackupTarget] = useState<WorldBackup | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [datapackWorld, setDatapackWorld] = useState<WorldSummary | null>(null)
   const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
@@ -86,6 +89,7 @@ export function WorldsPage() {
     setDeleteWorldTarget(null)
     setDeleteBackupTarget(null)
     setDeleteBedrockBackupTarget(null)
+    setDatapackWorld(null)
     void load()
   }, [installationId, load])
 
@@ -187,6 +191,16 @@ export function WorldsPage() {
   const worlds = result?.worlds ?? []
   const backups = result?.backups ?? []
   const bedrockBackups = bedrockResult?.backups ?? []
+  const lastBackupByWorld = useMemo(() => {
+    const map = new Map<string, WorldBackup>()
+    for (const backup of backups) {
+      const current = map.get(backup.worldFolder)
+      if (!current || new Date(backup.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+        map.set(backup.worldFolder, backup)
+      }
+    }
+    return map
+  }, [backups])
   const totalWorldSize = useMemo(() => worlds.reduce((sum, world) => sum + world.sizeBytes, 0), [worlds])
   const totalBackupSize = useMemo(() => backups.reduce((sum, backup) => sum + backup.sizeBytes, 0), [backups])
   const totalBedrockBackupSize = useMemo(
@@ -612,6 +626,14 @@ export function WorldsPage() {
                           <strong>{world.lastPlayed ? relativeTime(world.lastPlayed) : 'Unknown'}</strong>
                         </span>
                         <span>
+                          <span>Last backup</span>
+                          <strong>
+                            {lastBackupByWorld.has(world.folder)
+                              ? relativeTime(lastBackupByWorld.get(world.folder)!.createdAt)
+                              : 'Never'}
+                          </strong>
+                        </span>
+                        <span>
                           <span>Size</span>
                           <strong>{formatBytes(world.sizeBytes)}</strong>
                         </span>
@@ -622,6 +644,14 @@ export function WorldsPage() {
                       </div>
 
                       <div className="world-card__actions">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<Database />}
+                          onClick={() => setDatapackWorld(world)}
+                        >
+                          Datapacks
+                        </Button>
                         <Button
                           size="sm"
                           variant="subtle"
@@ -681,6 +711,7 @@ export function WorldsPage() {
                       <span className="backup-row__copy">
                         <span className="backup-row__title">
                           {backup.name}
+                          {backup.automatic ? <Badge tone="info">Auto</Badge> : null}
                           {backup.note ? <span className="backup-row__note">{backup.note}</span> : null}
                         </span>
                         <span className="backup-row__meta">
@@ -789,6 +820,13 @@ export function WorldsPage() {
       >
         {deleteError ? <div className="callout callout--danger">{deleteError}</div> : null}
       </ConfirmDialog>
+
+      <WorldDatapacksDialog
+        installationId={installationId}
+        world={datapackWorld}
+        onClose={() => setDatapackWorld(null)}
+        onChanged={() => void load()}
+      />
     </div>
   )
 }
