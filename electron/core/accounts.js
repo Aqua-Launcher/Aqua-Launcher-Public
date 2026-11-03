@@ -260,7 +260,7 @@ export class AccountManager {
 
   accountsPayload() {
     return {
-      // Offline profiles are intentionally not exposed by the compliant line.
+      // Only Microsoft accounts are exposed.
       accounts: this.listPublic().filter((account) => account.type !== 'offline'),
       activeAccountId: this.store.activeAccountId,
       secureStorageAvailable: this.persistenceAvailable,

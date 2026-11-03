@@ -57,9 +57,6 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "!electron/core/bedrock*.js",
-      "!electron/core/horizon*.js",
-      "!electron/core/addon-browser.js",
       "package.json",
       "build/icon.png"
     ],

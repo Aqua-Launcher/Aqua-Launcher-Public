@@ -46,8 +46,6 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
 import { Badge, Button, EmptyState, IconButton, cx } from '../components/ui/primitives'
 import { ConfirmDialog } from '../components/ui/overlays'
-import { InstallBedrockDialog } from '../components/bedrock/InstallBedrockDialog'
-import { RegisterBedrockDialog } from '../components/bedrock/RegisterBedrockDialog'
 import { HealthDialog } from '../components/dialogs/HealthDialog'
 import { ImportPackDialog } from '../components/installations/ImportPackDialog'
 import { LauncherImportDialog } from '../components/installations/LauncherImportDialog'
@@ -117,8 +115,6 @@ export function InstallationsPage() {
     bedrockLibrary,
     bedrockDownloads,
     cancelBedrockVersion,
-    registerBedrockVersion,
-    installBedrockVersion,
     removeBedrockVersion,
     openBedrockVersionFolder,
     launchHorizon,
@@ -148,8 +144,8 @@ export function InstallationsPage() {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [launchingEditionId, setLaunchingEditionId] = useState<string | null>(null)
-  const [registerTarget, setRegisterTarget] = useState<string | null>(null)
-  const [installTarget, setInstallTarget] = useState<string | null>(null)
+  const [, setRegisterTarget] = useState<string | null>(null)
+  const [, setInstallTarget] = useState<string | null>(null)
   const [healthTarget, setHealthTarget] = useState<Installation | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [launcherImportOpen, setLauncherImportOpen] = useState(false)
@@ -1357,28 +1353,7 @@ export function InstallationsPage() {
 
       <InstallationMetaDialog installation={metaTarget} onClose={() => setMetaTarget(null)} />
 
-      <RegisterBedrockDialog
-        version={registerTarget}
-        onCancel={() => setRegisterTarget(null)}
-        onConfirm={(options) => {
-          const version = registerTarget
-          setRegisterTarget(null)
-          if (version) void registerBedrockVersion(version, options)
-        }}
-      />
-
       {healthTarget ? <HealthDialog installation={healthTarget} onClose={() => setHealthTarget(null)} /> : null}
-
-      <InstallBedrockDialog
-        version={installTarget}
-        installedVersion={bedrock?.editions[0]?.version || null}
-        onCancel={() => setInstallTarget(null)}
-        onConfirm={() => {
-          const version = installTarget
-          setInstallTarget(null)
-          if (version) void installBedrockVersion(version)
-        }}
-      />
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

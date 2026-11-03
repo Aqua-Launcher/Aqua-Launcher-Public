@@ -22,7 +22,6 @@ test('extensions route jars, packs and Bedrock files', () => {
   assert.equal(importExtension('Sodium.jar'), 'mod')
   assert.equal(importExtension('pack.ZIP'), 'zip')
   assert.equal(importExtension('pack.mrpack'), 'mrpack')
-  assert.equal(importExtension('addon.mcpack'), 'bedrock')
   assert.equal(importExtension('readme.txt'), null)
 })
 
@@ -106,27 +105,6 @@ test('unsafe and unsupported paths become errors', async (t) => {
   assert.equal(result.errors.length, 2)
   assert.match(result.errors[0].reason, /absolute/i)
   assert.match(result.errors[1].reason, /Modpack import/i)
-})
-
-test('Bedrock add-ons route through the existing importer', async (t) => {
-  const root = await tempRoot(t)
-  const addon = path.join(root, 'addon.mcpack')
-  await fsp.writeFile(addon, 'addon')
-  let called = null
-
-  const result = await runImports({
-    paths: [addon],
-    bedrockEditionId: 'edition',
-    bedrockImport: async (editionId, filePath) => {
-      called = { editionId, filePath }
-      return { installed: [{ name: 'Example Pack' }], skipped: [], worlds: [] }
-    },
-  })
-
-  assert.deepEqual(called, { editionId: 'edition', filePath: addon })
-  assert.equal(result.imported.length, 1)
-  assert.equal(result.imported[0].contentType, 'bedrock')
-  assert.match(result.imported[0].destination, /Example Pack/)
 })
 
 test('dry runs return the plan without copying', async (t) => {

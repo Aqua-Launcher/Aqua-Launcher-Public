@@ -2,13 +2,6 @@
   <img src="https://aqua.ch1n.dev/assets/og.jpg" alt="Aqua Website: More ways to play!" width="100%">
 </p>
 
-## THIS DOES NOT PROMOTE PIRACY MICROSOFT MOJANG VALIDATION IS UNDER APPROVAL
-
-> **Main branch compliance:** `main` is the Mojang-compliant line. It supports only
-> Microsoft-authenticated Minecraft: Java Edition through the official Microsoft OAuth
-> flow. Bedrock Edition, Horizon, and offline profiles are not included on this branch;
-> they remain available on the `experimental` branch.
-
 A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. Aqua manages game files and Java runtimes, keeps separate installation profiles, launches the game, and surfaces logs and crash reports without leaving the app. It authenticates with Microsoft and launches Minecraft: Java Edition.
 
 ![Electron](https://img.shields.io/badge/Electron-45-2b2e3a)
@@ -19,12 +12,12 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 ## Features
 
 - **Dashboard** with the active installation, player profile, live launcher status, recent sessions, and a single Play action.
-- **Microsoft accounts** using the official OAuth device flow with PKCE. Refresh tokens are encrypted with the operating system credential store (Windows DPAPI, macOS Keychain, or the system keyring); if encryption is unavailable, sessions stay in memory only.
+- **Microsoft accounts** using the official OAuth authorization-code flow with PKCE and a local loopback callback. Refresh tokens are encrypted with the operating system credential store (Windows DPAPI, macOS Keychain, or the system keyring); if encryption is unavailable, sessions stay in memory only.
 - **Installations** that can be created, renamed, duplicated, edited, and deleted. Deleting an installation removes the profile entry but keeps its game directory, worlds, and downloaded files on disk.
-- **Version browser** in **New installation**: Minecraft releases and snapshots, searchable and filtered, with the metadata Aqua needs to install it.
+- **Version browser** in **New installation**: Minecraft releases and snapshots, searchable and filtered, with the metadata Aqua needs to install them.
 - **Worlds & backups** for every installation, with world icons, game mode, last-played time, folder sizes, one-click ZIP backups, non-destructive restores, and world deletion. Backups live in the launcher data folder, so they survive profile edits.
-- **Server list** with saved addresses, live status checks, quick refresh, and one-click joins. Java servers use Server List Ping and Quick Play.
-- **Discord Rich Presence** (opt-in): shows the active Java instance, Minecraft version, loader and elapsed time, plus the server address only when a second switch allows it. Discord's Join action opens Aqua's normal confirmation instead of joining silently.
+- **Server list** with saved addresses, live status checks, quick refresh, and one-click joins using Server List Ping and Quick Play.
+- **Discord Rich Presence** (opt-in): shows the active instance, Minecraft version, loader and elapsed time, plus the server address only when a second switch allows it. Discord's Join action opens Aqua's normal confirmation instead of joining silently.
 - **Mod loaders** for Fabric, Quilt, Forge, and NeoForge. Fabric and Quilt use their official meta profiles; Forge and NeoForge run their own installers into the launcher's Minecraft root. A loader is selected per installation and its profile version is what gets downloaded and launched.
 - **Minecraft installation pipeline** that resolves inheritance, libraries, natives, assets, and logging configuration, with integrity-checked downloads, verification, and repair. Interrupted installs reuse already-verified files.
 - **Mod updates** via Modrinth's hash lookup: check all installed content at once, update individual files, or update everything, while preserving disabled files.
@@ -34,7 +27,7 @@ A desktop Minecraft launcher built with Electron, React, TypeScript, and Vite. A
 - **Tasks** page that collects every background job — game downloads, Java runtimes, storage scans, and launch preparation — with live progress, speed, size, time remaining, cancel, retry, and clear-finished actions.
 - **Shared Minecraft settings** that keep `options.txt`, `optionsof.txt`, `optionsshaders.txt`, and `servers.dat` identical across installations, covering video, audio, controls, language, shaders, and the multiplayer server list.
 - **Mod retargeting** that rewrites a mod's declared Minecraft version range for the selected profile when the jar is otherwise compatible, keeping the original jar for an undo.
-- **First-run setup** that only asks for a player name. Java, memory, folders, and versions use defaults and are configured later from Settings when needed.
+- **First-run setup** that connects a Microsoft account and picks a player profile. Java, memory, folders, and versions use defaults and are configured later from Settings when needed.
 - **Roadmap & docs** page carrying this README and a feature-level view of the roadmap, so what Aqua does and what is planned next can be read inside the launcher instead of on GitHub.
 
 ## Requirements
@@ -65,7 +58,7 @@ Aqua registers the `aqua://` scheme for launch, join, install and open actions:
 
 ```text
 aqua://join?server=play.example.net
-aqua://join?server=play.example.net:25566&edition=java
+aqua://join?server=play.example.net:25566
 aqua://launch?instance=Survival
 aqua://install?pack=fabulously-optimized
 aqua://open?page=stats
@@ -94,11 +87,11 @@ A copy built from source needs its own Discord application: create one at the [D
 
 ## Accounts
 
-Aqua supports Microsoft accounts only. Sign-in uses the official OAuth authorization-code flow with PKCE and a local loopback callback.
+Aqua signs in with Microsoft. The flow uses OAuth authorization code with PKCE and a local loopback callback.
 
-1. **Microsoft** — sign in with the account that owns Minecraft: Java Edition. Aqua loads your player name and skin, refreshes the session before each launch, and stores only an encrypted refresh token. The Azure application must be approved for Minecraft API access by Mojang.
+Sign in with the account that owns Minecraft: Java Edition. Aqua loads your player name and skin, refreshes the session before each launch, and stores only an encrypted refresh token. The Azure application must be approved for Minecraft API access by Mojang.
 
-Offline profiles are not available on this branch. Microsoft sign-in requires an Azure application (client) ID, configured from **Account → Connect Microsoft** or **Settings**. Tokens never touch `localStorage` or the renderer process.
+Microsoft sign-in requires an Azure application (client) ID, configured from **Account → Connect Microsoft** or **Settings**. Tokens never touch `localStorage` or the renderer process.
 
 ## Extra content
 
@@ -122,23 +115,19 @@ CurseForge profiles are read from their local `minecraftinstance.json`; the Curs
 
 **Settings → Minecraft settings** keeps one copy of the files Minecraft itself writes for client settings: `options.txt` (video, audio, controls, and language), `optionsof.txt` and `optionsshaders.txt` (modded video and shader selection), and `servers.dat` (the multiplayer list). Mod configs, resource packs, worlds, and saves are never copied.
 
-**Save from <installation>** copies the current files out of that profile, **Apply here** writes them into the selected profile, and **Apply to all** writes them into every Java installation. With **Share settings between installations** on, Aqua also applies the shared copy before each Java launch and captures it again when the game closes, so a change made in game reaches the next profile you start. The files live in `minecraft-settings/` in the launcher data folder, and the panel lists what is stored and when it was last saved.
+**Save from <installation>** copies the current files out of that profile, **Apply here** writes them into the selected profile, and **Apply to all** writes them into every installation. With **Share settings between installations** on, Aqua also applies the shared copy before each launch and captures it again when the game closes, so a change made in game reaches the next profile you start. The files live in `minecraft-settings/` in the launcher data folder, and the panel lists what is stored and when it was last saved.
 
 ## Worlds and backups
 
 **Worlds & backups** reads each world's `level.dat` to show its real name, game mode, difficulty, Minecraft version, last-played time, file count, and size. From there you can open a world folder, delete a world, or create a ZIP backup.
 
-Switch the page to **Bedrock** to list the worlds in the selected Bedrock edition's `minecraftWorlds` folder. Bedrock names come from each world's `levelname.txt` and its thumbnail from `world_icon.jpeg`; those worlds are listed read-only, because Bedrock manages them inside the Store app.
-
 Backups are stored per installation under `backups/` in the launcher data folder. A restore is deliberately non-destructive: it adds the snapshot as `Name (restored)` beside the existing world, so an accidental restore can never replace the world you are still playing. Worlds are backed up on demand; close Minecraft first if you want a fully consistent snapshot.
 
 ## Servers
 
-**Servers** stores the addresses you play on and pings each one the way its edition expects. Java servers use the same Server List Ping handshake as the game's multiplayer screen, so cards show the MOTD, online/max players, server version, latency, and the server's icon; joining launches the selected installation with `--quickPlayMultiplayer`. Addresses entered without a port stay port-free for Quick Join, which keeps SRV records working; status pings follow those records too.
+**Servers** stores the addresses you play on and pings each one with the same Server List Ping handshake as the game's multiplayer screen, so cards show the MOTD, online/max players, server version, latency, and the server's icon. Joining launches the selected installation with `--quickPlayMultiplayer`. Addresses entered without a port stay port-free for Quick Join, which keeps SRV records working; status pings follow those records too.
 
-Bedrock servers are queried with RakNet's Unconnected Ping over UDP (port 19132 by default), which returns the MOTD, level name, player counts, version, and game mode. Joining opens Minecraft for Windows through `minecraft://connect?serverUrl=…&serverPort=…`, so Bedrock connects on load without a Java profile. Pick the edition when you add a server; it is shown on the card and can only be changed by re-adding the server.
-
-Quick join needs Minecraft 1.20 or newer. On older versions the game opens normally and Aqua tells you to connect from the multiplayer menu. Offline profiles can only join servers with `online-mode=false`; online-mode servers need Microsoft sign-in.
+Quick join needs Minecraft 1.20 or newer. On older versions the game opens normally and Aqua tells you to connect from the multiplayer menu. Online-mode servers verify the Microsoft account you signed in with.
 
 ## Artwork
 
@@ -149,7 +138,7 @@ The dashboard background and wordmark are replaceable without code changes. Drop
 
 The first matching file wins. If none exists, Aqua falls back to its built-in pixel wordmark and voxel scene. See [`public/artwork/README.md`](public/artwork/README.md) for recommended sizes and composition.
 
-The dashboard background itself prefers the version's own update art. Aqua fetches it from `https://aqua.ch1n.dev/api/launcher/artwork/<version>.png`, checks it is a PNG, and caches it under `cache/artwork/` so it keeps working offline. A release with its own artwork keeps it; a release without art walks forward through its own update line to the file named after the update's last release (1.7.6 asks for 1.7.10, 1.20.1 asks for 1.20.2), while 1.5 never borrows 1.6's art. When the endpoint has no art for a version, Aqua falls back to the older Mojang pipeline: it works out which game drop the version belongs to from that version's patch notes, downloads the drop's wallpaper pack, keeps the sharpest wide image, and caches it as a 1920 px JPEG. Versions released before the published drops (1.19.4 and older) have no art, so they use `background.*` instead.
+The dashboard background itself prefers the version's own update art. Aqua fetches it from `https://aqua.ch1n.dev/api/launcher/artwork/<version>.png`, checks it is a PNG, and caches it under `cache/artwork/` so it keeps working without a network connection. A release with its own artwork keeps it; a release without art walks forward through its own update line to the file named after the update's last release (1.7.6 asks for 1.7.10, 1.20.1 asks for 1.20.2), while 1.5 never borrows 1.6's art. When the endpoint has no art for a version, Aqua falls back to the older Mojang pipeline: it works out which game drop the version belongs to from that version's patch notes, downloads the drop's wallpaper pack, keeps the sharpest wide image, and caches it as a 1920 px JPEG. Versions released before the published drops (1.19.4 and older) have no art, so they use `background.*` instead.
 
 ## Data locations
 
@@ -170,10 +159,8 @@ Inside that folder:
 - `runtime/` — downloaded Mojang Java runtimes
 - `logs/launcher.log` and `logs/game/` — launcher and game output
 - `backups/<installation>/` — world backup archives and their index
-- `bedrock/versions/<version>/` and `bedrock/downloads/` — downloaded Bedrock builds and their temporary packages
 - `minecraft-settings/` — shared `options*.txt` and `servers.dat`
-- `horizon/` — Horizon builds, game home, worlds, downloads, and the native toolchain
-- `cache/artwork/` — dashboard version artwork, so it still appears offline
+- `cache/artwork/` — dashboard version artwork
 
 ### Portable mode
 
@@ -192,7 +179,7 @@ Aqua is keyboard-operable from the titlebar to every page: use `Tab`/`Shift+Tab`
 ## Development
 
 ```bash
-npm test         # Node test runner: rules, paths, worlds, servers, Bedrock, Horizon, docs, settings
+npm test         # Node test runner: rules, paths, worlds, servers, docs, settings
 npm run typecheck
 npm run build
 npm run icons    # regenerate app icons from scripts/generate-icons.mjs
@@ -206,18 +193,13 @@ electron/
   preload.cjs         typed, allow-listed IPC bridge
   ipc.js              IPC handlers and validation boundary
   core/
-    accounts.js       Microsoft OAuth, offline profiles, token storage
+    accounts.js       Microsoft OAuth and token storage
     versions.js       Mojang manifest and version metadata cache
     installations.js  profile CRUD and directory management
     installer.js      download planning and file verification
     downloader.js     bounded-concurrency downloads with retries
     worlds.js         level.dat parsing, world listing, ZIP backups and restores
     servers.js        saved servers, Server List Ping, quick-join metadata
-    bedrock.js        Store edition detection, launching, Bedrock worlds
-    bedrock-versions.js  Store version catalogue, package downloads, registration
-    bedrock-addons.js    Bedrock pack parsing, import/remove, add-on listing
-    horizon.js          Horizon release install, preparation, and direct Rust client launch
-    addon-browser.js     in-app add-on browser policy and download-to-import bridge
     minecraft-settings.js  shared options.txt/optionsof.txt/optionsshaders.txt/servers.dat
     mod-retarget.js      rewrites a mod's declared Minecraft range, with undo
     doc-images.js        fetches README and ROADMAP images for the Docs page
@@ -228,7 +210,7 @@ electron/
     store.js          atomic JSON persistence
 src/
   pages/              Home, Installations, Tasks, Worlds, Servers, Extra content, Account, Logs, Roadmap & docs, Settings
-  components/         layout, dialogs, overlays, bedrock, design-system primitives
+  components/         layout, dialogs, overlays, design-system primitives
   state/              launcher provider and renderer state
   lib/                IPC API, types, formatting helpers
   styles/             tokens, components, application layout
@@ -251,6 +233,5 @@ This builds the renderer and uses `electron-builder` to produce an installer in 
 - Minecraft 1.12.2 and older (and their Forge/Fabric-era mod loaders) run only on Java 8, which the launcher will not substitute with a newer runtime — install it once from **Settings → Java → Official runtimes → Install Java 8** and those profiles pick it up automatically.
 - Java detection scans common system locations and Aqua's own runtime folder. You can always select a custom `java.exe` in Settings.
 - The launcher supports vanilla and version metadata that follows the standard Mojang format; mod loaders are not installed automatically.
-- Builds that depend on frameworks Windows 11 no longer ships only register once those requirements are dropped from their manifest, and any Store feature backed by that framework stops working.
 - Mod retargeting changes only the declared Minecraft version range. A mod whose code depends on APIs that changed still needs its own updated release.
-- The Play target is remembered for the running session only; the launcher starts on the active Java installation again after a restart.
+- The Play target is remembered for the running session only; the launcher starts on the active installation again after a restart.

@@ -69,7 +69,7 @@ function optionalLinkText(value, label, maxLength) {
 function normalizeEdition(value) {
   if (value == null || value === '') return 'java'
   if (value === 'java') return value
-  throw new Error('The compliant build only supports Minecraft: Java Edition servers.')
+  throw new Error('Aqua only supports Minecraft: Java Edition servers.')
 }
 
 function normalizeProject(value) {

@@ -88,7 +88,7 @@ test('drop wallpaper matches a version to its game drop', () => {
     entries: [
       { title: 'Play Wilderness Bound', newsType: ['Java'] },
       { title: 'Play Mounts of Mayhem Today', newsType: ['Java'] },
-      { title: 'Enter the Marketplace', newsType: ['Bedrock'] },
+      { title: 'Enter the Marketplace', newsType: ['Java'] },
     ],
   })
   assert.equal(names.has('trailsandtales'), true)

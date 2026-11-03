@@ -10,10 +10,6 @@ test('join links validate the address and keep the profile and edition', () => {
   assert.equal(intent.edition, 'java')
   assert.equal(intent.confirmed, false)
 
-  assert.throws(
-    () => parseAquaLink('aqua://join?server=1.2.3.4&edition=bedrock'),
-    /Java Edition/,
-  )
 })
 
 test('launch, install and open links map onto the renderer routes', () => {

@@ -29,12 +29,9 @@ async function createFixture() {
     versionCacheRoot: path.join(dataRoot, 'cache', 'versions'),
     artworkCacheRoot: path.join(dataRoot, 'cache', 'artwork'),
     backupsRoot: path.join(dataRoot, 'backups'),
-    bedrockRoot: path.join(dataRoot, 'bedrock'),
-    bedrockDownloadsRoot: path.join(dataRoot, 'bedrock', 'downloads'),
     manifestCacheFile: path.join(dataRoot, 'cache', 'version-manifest.json'),
     patchNotesCacheFile: path.join(dataRoot, 'cache', 'patch-notes.json'),
     dropsCacheFile: path.join(dataRoot, 'cache', 'minecraft-drops.json'),
-    bedrockVersionsCacheFile: path.join(dataRoot, 'cache', 'bedrock-versions.json'),
     launcherLog: path.join(dataRoot, 'logs', 'launcher.log'),
   }
 
@@ -53,7 +50,6 @@ async function createFixture() {
   await writeFile(path.join(paths.avatarCacheRoot, 'avatar.png'), 'avatar-bytes')
   await writeFile(path.join(paths.versionCacheRoot, 'tile.png'), 'tile-bytes')
   await writeFile(paths.manifestCacheFile, '{"versions":[]}')
-  await writeFile(path.join(paths.bedrockDownloadsRoot, '1.9.0.1.appx'), 'bedrock-package')
 
   const stale = new Date(Date.now() - 30 * DAY_MS)
   await fs.utimes(oldLog, stale, stale)
@@ -156,7 +152,6 @@ test('a scan measures every launcher folder and adds up to its total', async (t)
   assert.equal(byId.versions.bytes, 'version-json'.length + 'stale-json'.length)
   assert.equal(byId.backups.bytes, 'backup'.length)
   assert.equal(byId.caches.bytes, 'png-bytes'.length + 'avatar-bytes'.length + 'tile-bytes'.length + '{"versions":[]}'.length)
-  assert.equal(byId.bedrock.bytes, 'bedrock-package'.length)
   assert.equal(
     scan.totalBytes,
     scan.categories.reduce((sum, category) => sum + category.bytes, 0),

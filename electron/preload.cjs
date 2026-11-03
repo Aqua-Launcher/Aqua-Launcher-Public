@@ -210,7 +210,6 @@ const api = {
     chooseJava: () => invoke('dialog:chooseJava'),
     chooseAddon: () => invoke('dialog:chooseAddon'),
     choosePack: () => invoke('dialog:choosePack'),
-    chooseHorizonMod: () => invoke('dialog:chooseHorizonMod'),
   },
   events: {
     subscribe: (handler) => {

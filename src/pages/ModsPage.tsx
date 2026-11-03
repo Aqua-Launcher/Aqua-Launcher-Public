@@ -5,7 +5,6 @@ import {
   Boxes,
   Download,
   FolderOpen,
-  Gem,
   Info,
   Loader2,
   Package,
@@ -23,7 +22,6 @@ import { contentTypeOption } from '../lib/contentTypes'
 import { formatBytes, relativeTime } from '../lib/format'
 import { FILTER_CATEGORIES, FILTER_ENVIRONMENTS, FILTER_LICENSES, FILTER_LOADERS, FILTER_SORTS } from '../lib/modrinthFilters'
 import { useLauncher } from '../state/LauncherProvider'
-import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../lib/features'
 import type {
   ContentConflictsResult,
   ContentFilterEntry,
@@ -37,8 +35,6 @@ import type {
   WorldSummary,
 } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
-import { BedrockAddonsPanel } from '../components/bedrock/BedrockAddonsPanel'
-import { HorizonModsPanel } from '../components/horizon/HorizonModsPanel'
 import { ModRetargetDialog } from '../components/mods/ModRetargetDialog'
 import { ModDetailDrawer } from '../components/mods/ModDetailDrawer'
 import { ModFileInspector } from '../components/mods/ModFileInspector'
@@ -66,28 +62,6 @@ function EditionSwitch({
       >
         <Boxes /> Java Edition
       </button>
-      {HORIZON_ENABLED ? (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={edition === 'horizon'}
-          className={edition === 'horizon' ? 'is-active' : undefined}
-          onClick={() => onChange('horizon')}
-        >
-          <Package /> Horizon Mods
-        </button>
-      ) : null}
-      {BEDROCK_ENABLED ? (
-        <button
-          type="button"
-          role="tab"
-          aria-selected={edition === 'bedrock'}
-          className={edition === 'bedrock' ? 'is-active' : undefined}
-          onClick={() => onChange('bedrock')}
-        >
-          <Gem /> Bedrock Edition
-        </button>
-      ) : null}
     </div>
   )
 }
@@ -624,32 +598,6 @@ export function ModsPage() {
     } catch (error) {
       pushToast({ level: 'error', title: 'Could not open the folder', message: getErrorMessage(error) })
     }
-  }
-
-  if (edition === 'bedrock') {
-    return (
-      <div className="page">
-        <PageHeader
-          title="Extra content"
-          subtitle="Browse Bedrock add-on sites in the launcher, or import .mcpack and .mcaddon files you already have."
-        />
-        <EditionSwitch edition={edition} onChange={setEdition} />
-        <BedrockAddonsPanel />
-      </div>
-    )
-  }
-
-  if (edition === 'horizon') {
-    return (
-      <div className="page">
-        <PageHeader
-          title="Extra content"
-          subtitle="Browse playhorizon.dev in the launcher and manage the mods, native bundles, and resource packs Horizon loads."
-        />
-        <EditionSwitch edition={edition} onChange={setEdition} />
-        <HorizonModsPanel />
-      </div>
-    )
   }
 
   if (!selectedInstallation && !isModpack) {
