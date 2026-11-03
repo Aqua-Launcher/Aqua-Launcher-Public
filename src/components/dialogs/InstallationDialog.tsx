@@ -15,6 +15,7 @@ import {
 import { api, getErrorMessage } from '../../lib/api'
 import { formatBytes, formatDate, versionTypeLabel } from '../../lib/format'
 import { useLauncher } from '../../state/LauncherProvider'
+import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../../lib/features'
 import type {
   BedrockCatalogEntry,
   HorizonRelease,
@@ -31,11 +32,13 @@ import { Modal } from '../ui/overlays'
 type VersionFilter = 'release' | 'snapshot' | 'all'
 type BedrockChannel = 'release' | 'beta' | 'all'
 
-const EDITIONS: Array<{ id: InstallEdition; label: string; hint: string; icon: typeof Boxes }> = [
+const EDITIONS: Array<{ id: InstallEdition; label: string; hint: string; icon: typeof Boxes }> = ([
   { id: 'java', label: 'Java Edition', hint: 'Mojang releases and snapshots', icon: Boxes },
   { id: 'bedrock', label: 'Bedrock Edition', hint: 'Builds from Microsoft', icon: Gem },
   { id: 'horizon', label: 'Horizon', hint: 'The Rust client, prepared by Aqua', icon: Cpu },
-]
+] as Array<{ id: InstallEdition; label: string; hint: string; icon: typeof Boxes }>).filter(
+  (entry) => entry.id === 'java' || (entry.id === 'bedrock' ? BEDROCK_ENABLED : HORIZON_ENABLED),
+)
 
 const CHANNEL_LABEL: Record<BedrockCatalogEntry['channel'], string> = {
   release: 'Release',
@@ -108,7 +111,14 @@ export function InstallationDialog() {
     setVersionId(existing?.versionId || installDialog.versionId || '')
     setGameDir(existing?.gameDir || '')
     setVersionSearch('')
-    setEdition(existing ? 'java' : installDialog.edition || 'java')
+    const requestedEdition = existing ? 'java' : installDialog.edition || 'java'
+    setEdition(
+      requestedEdition === 'bedrock' && !BEDROCK_ENABLED
+        ? 'java'
+        : requestedEdition === 'horizon' && !HORIZON_ENABLED
+          ? 'java'
+          : requestedEdition,
+    )
     setBedrockChannel('release')
     setLoaderType(existing?.loader?.type || 'vanilla')
     setLoaderVersion(existing?.loader?.version || '')

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, getErrorMessage, type EventPayloadMap } from '../lib/api'
+import { BEDROCK_ENABLED, HORIZON_ENABLED } from '../lib/features'
 import { analyzeServerCompatibility, type JoinWarningState } from '../lib/serverCompatibility'
 import type {
   ActivityEntry,
@@ -287,6 +288,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   )
 
   const refreshBedrock = useCallback(async (force = false) => {
+    if (!BEDROCK_ENABLED) return
     const requestId = ++bedrockRequest.current
     setBedrockLoading(true)
     setBedrockError(null)
@@ -324,6 +326,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
    * the `horizon-install` and `horizon-native` events keep it current afterwards.
    */
   const refreshHorizonTasks = useCallback(async () => {
+    if (!HORIZON_ENABLED) return
     try {
       const status = await api.horizon.status()
       if (status?.install) setHorizonInstallJob(status.install)
@@ -350,9 +353,11 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       if (boot.versions?.stale || !boot.versions) void refreshVersions(false)
       void refreshJava(false)
-      void refreshBedrock(false)
-      void refreshBedrockLibrary()
-      void refreshHorizonTasks()
+      if (BEDROCK_ENABLED) {
+        void refreshBedrock(false)
+        void refreshBedrockLibrary()
+      }
+      if (HORIZON_ENABLED) void refreshHorizonTasks()
       api.windowControls.getState().then((state) => setWindowMaximized(state.maximized)).catch(() => {})
     } catch (error) {
       setBootError(getErrorMessage(error))
@@ -567,6 +572,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
       serverAddress: string | null = null,
       options: { keepTarget?: boolean } = {},
     ) => {
+      if (!BEDROCK_ENABLED) {
+        pushToast({ level: 'error', title: 'Bedrock is not available', message: 'This build supports Minecraft: Java Edition only.' })
+        return false
+      }
       if (!options.keepTarget) {
         setBedrockTargetId(editionId)
         setHorizonTarget(null)
@@ -597,6 +606,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   /** Downloaded Bedrock builds, which live in the launcher's own folder. */
   const refreshBedrockLibrary = useCallback(async () => {
+    if (!BEDROCK_ENABLED) return
     try {
       const state = await api.bedrock.versionsState()
       setBedrockLibrary([...state.library])
@@ -613,6 +623,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshBedrockVersions = useCallback(async (force = false) => {
+    if (!BEDROCK_ENABLED) return
     const requestId = ++bedrockVersionsRequest.current
     setBedrockVersionsLoading(true)
     setBedrockVersionsError(null)
@@ -1108,6 +1119,10 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
   /** Starts a Horizon build directly and points the dashboard's Play at it. */
   const launchHorizon = useCallback(
     async (build: HorizonBuild, options: { keepTarget?: boolean } = {}) => {
+      if (!HORIZON_ENABLED) {
+        pushToast({ level: 'error', title: 'Horizon is not available', message: 'This build supports Minecraft: Java Edition only.' })
+        return false
+      }
       if (!build.prepared) {
         pushToast({
           level: 'info',
@@ -1197,9 +1212,8 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
     await api.accounts.beginLogin()
   }, [])
 
-  const signInOffline = useCallback(async (name: string) => {
-    const accountsState = await api.accounts.signInOffline(name)
-    setData((current) => (current ? { ...current, accounts: accountsState } : current))
+  const signInOffline = useCallback(async (_name: string) => {
+    throw new Error('Offline profiles are not available in this build. Sign in with a Microsoft account.')
   }, [])
 
   const cancelAuth = useCallback(async () => {
@@ -1261,7 +1275,7 @@ export function LauncherProvider({ children }: { children: ReactNode }) {
 
   const bedrockTarget = useMemo(
     () =>
-      bedrockTargetId
+      BEDROCK_ENABLED && bedrockTargetId
         ? bedrock?.editions.find((edition) => edition.id === bedrockTargetId) || null
         : null,
     [bedrock, bedrockTargetId],

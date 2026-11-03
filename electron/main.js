@@ -6,7 +6,6 @@ import {
   Tray,
   dialog,
   nativeImage,
-  net,
   session,
   shell,
 } from 'electron'
@@ -14,24 +13,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AccountManager } from './core/accounts.js'
-import {
-  ADDON_BROWSER_PARTITION,
-  allowAddonBrowserWebviews,
-  attachAddonDownloads,
-} from './core/addon-browser.js'
 import { ArtworkService } from './core/artwork.js'
 import { BackupScheduler } from './core/backup-scheduler.js'
-import { BedrockService } from './core/bedrock.js'
-import { BedrockAddonsService } from './core/bedrock-addons.js'
-import { BedrockVersionsService } from './core/bedrock-versions.js'
 import { BlockTextureService } from './core/block-textures.js'
 import { ContentIndexService } from './core/content-index.js'
 import { DocImageService } from './core/doc-images.js'
 import { GameManager } from './core/game.js'
-import { HorizonService } from './core/horizon.js'
 import { HealthService } from './core/health.js'
-import { HorizonRegistryService } from './core/horizon-registry.js'
-import { HorizonNativeBuilder } from './core/horizon-native.js'
 import { InstallationService } from './core/installations.js'
 import { Installer } from './core/installer.js'
 import { JavaService } from './core/java.js'
@@ -319,11 +307,6 @@ function createWindow() {
     event.preventDefault()
     logger?.warn('Blocked renderer navigation', { url })
   })
-  allowAddonBrowserWebviews(mainWindow, {
-    openExternal: (url) => {
-      shell.openExternal(url).catch((error) => logger?.warn('Could not open a browser link', { message: error.message }))
-    },
-  })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     logger?.error('Renderer process exited unexpectedly', { reason: details.reason })
     if (!mainWindow?.isDestroyed() && mainWindow) {
@@ -430,53 +413,6 @@ async function initialize() {
     trashItem: (target) => shell.trashItem(target),
     logger,
   })
-  const bedrockService = new BedrockService({
-    logger,
-    store,
-    paths,
-    openExternal: (url) => shell.openExternal(url),
-    openPath: (target) => shell.openPath(target),
-    // Defined below; the launcher is already up by the time a game can launch.
-    emitActivity: () => emitActivity(),
-  })
-  const horizonService = new HorizonService({
-    paths,
-    installer,
-    javaService,
-    logger,
-    store,
-    openPath: (target) => shell.openPath(target),
-    // Defined below; the launcher is already up by the time an install or launch happens.
-    emitActivity: () => emitActivity(),
-    emitNotification: (notification) => emitNotification(notification),
-    emitProgress: (job) => broadcast('horizon-install', job),
-  })
-  const horizonRegistryService = new HorizonRegistryService({
-    paths,
-    horizonService,
-    logger,
-    store,
-    emitActivity: () => emitActivity(),
-  })
-  const horizonNativeBuilder = new HorizonNativeBuilder({
-    paths,
-    horizonService,
-    logger,
-    store,
-    emitProgress: (job) => broadcast('horizon-native', job),
-    emitNotification: (notification) => emitNotification(notification),
-    emitActivity: () => emitActivity(),
-  })
-  const bedrockAddonsService = new BedrockAddonsService({ logger, bedrockService })
-  const bedrockVersionsService = new BedrockVersionsService({
-    paths,
-    logger,
-    bedrockService,
-    // Electron's own network stack, so proxied or TLS-inspected connections keep working.
-    fetchImpl: (url, options) => net.fetch(url, options),
-    emitProgress: (payload) => broadcast('bedrock-versions', payload),
-  })
-
   let installationEmitQueue = Promise.resolve()
   const emitInstallations = () => {
     installationEmitQueue = installationEmitQueue
@@ -622,12 +558,6 @@ async function initialize() {
     worldsService,
     serverService,
     lanDiscovery,
-    bedrockService,
-    bedrockVersionsService,
-    bedrockAddonsService,
-    horizonService,
-    horizonRegistryService,
-    horizonNativeBuilder,
     installationService,
     javaService,
     healthService,
@@ -694,21 +624,6 @@ async function initialize() {
 
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   session.defaultSession.setPermissionCheckHandler(() => false)
-
-  // The add-on browser is a separate session: no permissions, no shared cookies
-  // with the launcher, and Bedrock pack downloads install themselves.
-  const addonBrowserSession = session.fromPartition(ADDON_BROWSER_PARTITION)
-  addonBrowserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
-  addonBrowserSession.setPermissionCheckHandler(() => false)
-  attachAddonDownloads({
-    browserSession: addonBrowserSession,
-    bedrockService,
-    bedrockAddonsService,
-    downloadsDirectory: app.getPath('downloads'),
-    logger,
-    notify: emitNotification,
-    onImported: ({ editionId }) => broadcast('bedrock-addons', { editionId }),
-  })
 
   accountManager.restoreActiveSession().catch((error) => {
     logger.warn('Could not restore the active account session', { message: error.message })

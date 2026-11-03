@@ -10,7 +10,7 @@ import {
   WifiOff,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../../lib/api'
-import { MICROSOFT_AUTH_ENABLED } from '../../lib/features'
+import { MICROSOFT_AUTH_ENABLED, OFFLINE_ACCOUNTS_ENABLED } from '../../lib/features'
 import { useLauncher } from '../../state/LauncherProvider'
 import { Button, Field, Spinner } from '../ui/primitives'
 import { Modal } from '../ui/overlays'
@@ -36,7 +36,7 @@ export function AuthModal() {
     accounts,
     authPhase,
   } = useLauncher()
-  const [mode, setMode] = useState<AuthMode>('offline')
+  const [mode, setMode] = useState<AuthMode>('microsoft')
   const [editingClientId, setEditingClientId] = useState(false)
   const [clientId, setClientId] = useState('')
   const [offlineName, setOfflineName] = useState('')
@@ -54,7 +54,7 @@ export function AuthModal() {
 
   useEffect(() => {
     if (!authOpen) return
-    setMode(MICROSOFT_AUTH_ENABLED ? authInitialMode || 'offline' : 'offline')
+    setMode(authInitialMode === 'offline' ? 'microsoft' : authInitialMode || 'microsoft')
     setError(null)
     setOfflineError(null)
     setClientId(configuredClientId)
@@ -208,7 +208,7 @@ export function AuthModal() {
         )
       }
     >
-      {MICROSOFT_AUTH_ENABLED && !success && !waiting && !finalizing ? (
+      {OFFLINE_ACCOUNTS_ENABLED && !success && !waiting && !finalizing ? (
         <div className="auth-methods" role="tablist" aria-label="Account type">
           <button
             type="button"
@@ -336,7 +336,7 @@ export function AuthModal() {
                 <ShieldCheck />
                 <div>
                   Sign-in requires your own Azure application ID. New app registrations also need to be approved by
-                  Mojang before Minecraft services accept them. If yours is not approved, use an offline profile.
+                  Mojang before Minecraft services accept them. If yours is not approved, Minecraft services will reject the sign-in.
                 </div>
               </div>
 
@@ -416,7 +416,7 @@ export function AuthModal() {
                 <TriangleAlert />
                 <span>
                   Microsoft now requires Minecraft API approval for third-party Azure apps. Without an approved app,
-                  use an offline profile.
+                  sign-in will not work until that approval is granted.
                 </span>
               </div>
               {error || authPhase === 'error' ? (

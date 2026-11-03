@@ -10,9 +10,10 @@ test('join links validate the address and keep the profile and edition', () => {
   assert.equal(intent.edition, 'java')
   assert.equal(intent.confirmed, false)
 
-  const bedrock = parseAquaLink('aqua://join?server=1.2.3.4&edition=bedrock')
-  assert.equal(bedrock.server, '1.2.3.4:19132')
-  assert.equal(bedrock.edition, 'bedrock')
+  assert.throws(
+    () => parseAquaLink('aqua://join?server=1.2.3.4&edition=bedrock'),
+    /Java Edition/,
+  )
 })
 
 test('launch, install and open links map onto the renderer routes', () => {
@@ -81,7 +82,7 @@ test('CLI status is parseable and malformed commands fail readably', () => {
   assert.throws(() => parseCommandLine(['aqua', 'launch', '--nope']), /Unknown option "--nope"/)
   assert.throws(() => parseCommandLine(['aqua', 'join']), /one server address/)
   assert.throws(() => parseCommandLine(['aqua', 'install', 'a', 'b']), /one Modrinth project/)
-  assert.throws(() => parseCommandLine(['aqua', 'join', 'x.test', '--edition', 'switch']), /java or bedrock/)
+  assert.throws(() => parseCommandLine(['aqua', 'join', 'x.test', '--edition', 'switch']), /Java Edition/)
 })
 
 test('status JSON carries profiles but never tokens or local paths', () => {

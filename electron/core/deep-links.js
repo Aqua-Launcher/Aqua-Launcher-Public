@@ -68,8 +68,8 @@ function optionalLinkText(value, label, maxLength) {
 
 function normalizeEdition(value) {
   if (value == null || value === '') return 'java'
-  if (value === 'java' || value === 'bedrock') return value
-  throw new Error('The server edition must be java or bedrock.')
+  if (value === 'java') return value
+  throw new Error('The compliant build only supports Minecraft: Java Edition servers.')
 }
 
 function normalizeProject(value) {

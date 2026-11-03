@@ -331,7 +331,7 @@ export function TasksPage() {
 
   const subtitle = active.length
     ? `${active.length} task${active.length === 1 ? '' : 's'} running · downloads, builds, and file work all land here`
-    : 'Every download, Horizon build, and other long launcher task appears here with live progress.'
+    : 'Every download, installation, and other long launcher task appears here with live progress.'
 
   return (
     <div className="page">
@@ -389,7 +389,7 @@ export function TasksPage() {
           <EmptyState
             icon={<Download />}
             title="Nothing is running"
-            description="Installing a version, Horizon's client, a native build, a Bedrock build, or an official Java runtime all show up here with speed, size, and time remaining."
+            description="Installing a version or an official Java runtime shows up here with speed, size, and time remaining."
           >
             <Button size="sm" icon={<Layers />} onClick={() => navigate('installations')}>
               Browse installations

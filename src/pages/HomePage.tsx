@@ -30,7 +30,7 @@ import {
   shortPath,
   versionTypeLabel,
 } from '../lib/format'
-import { MICROSOFT_AUTH_ENABLED } from '../lib/features'
+import { BEDROCK_ENABLED, HORIZON_ENABLED, MICROSOFT_AUTH_ENABLED } from '../lib/features'
 import { loaderLabel } from '../lib/loaders'
 import { useLauncher } from '../state/LauncherProvider'
 import type { ActivityEntry, DownloadJob, Installation, LoaderType, ServerEntry } from '../lib/types'
@@ -108,8 +108,8 @@ export function HomePage() {
   const gamePreparing = game.status === 'preparing'
   // Bedrock and Horizon run outside the launcher's process tracking, so they
   // never report a running game; the hero simply points Play at the target.
-  const targetIsBedrock = Boolean(bedrockTarget)
-  const targetIsHorizon = !targetIsBedrock && Boolean(horizonTarget)
+  const targetIsBedrock = BEDROCK_ENABLED && Boolean(bedrockTarget)
+  const targetIsHorizon = HORIZON_ENABLED && !targetIsBedrock && Boolean(horizonTarget)
   const targetIsJava = !targetIsBedrock && !targetIsHorizon
   // Bedrock builds carry their own numbers, so the hero asks for the Java drop
   // they belong to. Horizon follows one drop for now; its build names it.
@@ -519,7 +519,7 @@ export function HomePage() {
         </div>
       </section>
 
-      {bedrock?.editions.length ? (
+      {BEDROCK_ENABLED && bedrock?.editions.length ? (
         <section className="home-section">
           <div className="home-section__head">
             <h2>Bedrock Edition</h2>
@@ -702,8 +702,8 @@ export function HomePage() {
             <span className="quick-tile__title">New installation</span>
             <span className="quick-tile__meta">
               {versions
-                ? `${versions.versions.length.toLocaleString()} Java versions · Bedrock · Horizon`
-                : 'Java, Bedrock or Horizon'}
+                ? `${versions.versions.length.toLocaleString()} Minecraft: Java Edition versions`
+                : 'Minecraft: Java Edition versions'}
             </span>
           </span>
           <ChevronRight />

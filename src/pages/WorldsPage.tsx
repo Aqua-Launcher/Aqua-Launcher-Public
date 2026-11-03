@@ -18,6 +18,7 @@ import {
 import { api, getErrorMessage } from '../lib/api'
 import { formatBytes, formatDateTime, relativeTime, shortPath } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
+import { BEDROCK_ENABLED } from '../lib/features'
 import type {
   BedrockWorldBackup,
   BedrockWorldSummary,
@@ -45,7 +46,7 @@ function worldModeTone(mode: WorldSummary['gameMode']) {
 export function WorldsPage() {
   const { selectedInstallation, game, pushToast, navigate, bedrock } = useLauncher()
   const installationId = selectedInstallation?.id ?? null
-  const bedrockEdition = bedrock?.editions[0] ?? null
+  const bedrockEdition = BEDROCK_ENABLED ? bedrock?.editions[0] ?? null : null
   const [edition, setEdition] = useState<'java' | 'bedrock'>('java')
   const [bedrockResult, setBedrockResult] = useState<BedrockWorldsResult | null>(null)
   const [bedrockLoading, setBedrockLoading] = useState(false)

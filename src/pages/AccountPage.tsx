@@ -92,14 +92,10 @@ export function AccountPage() {
     <div className="page">
       <PageHeader
         title="Account"
-        subtitle={
-          MICROSOFT_AUTH_ENABLED
-            ? 'Sign in with an approved Microsoft app for online play, or use an offline profile stored on this device.'
-            : 'Offline profiles are stored on this device. Each one gets a generated player UUID.'
-        }
+        subtitle="Sign in with Microsoft to play Minecraft: Java Edition. Sessions are encrypted by your operating system."
         actions={
-          <Button variant="primary" icon={<UserPlus />} onClick={() => openAuth()}>
-            {MICROSOFT_AUTH_ENABLED ? 'Add account' : 'Add profile'}
+          <Button variant="primary" icon={<UserPlus />} onClick={() => openAuth('microsoft')}>
+            Add account
           </Button>
         }
       />
@@ -113,27 +109,20 @@ export function AccountPage() {
               </div>
             </div>
             <div className="account-empty__copy">
-              <h2>Add a player profile</h2>
+              <h2>Connect a Microsoft account</h2>
               <p>
-                {MICROSOFT_AUTH_ENABLED
-                  ? 'Offline profiles start instantly and work in singleplayer and LAN. Microsoft accounts use the official OAuth flow when your Azure app is approved for Minecraft services, and their sessions are encrypted with your operating system. You can keep several profiles and switch between them.'
-                  : 'Offline profiles start instantly and work in singleplayer and LAN. Each profile keeps its own username and generated UUID on this device, and you can switch between them at any time.'}
+                Sign in with the Microsoft account that owns Minecraft: Java Edition. Aqua uses Microsoft’s official OAuth flow, and your session is encrypted by your operating system. You can add more accounts and switch between them.
               </p>
               <div className="account-empty__actions">
-                <Button variant="primary" size="lg" icon={<WifiOff />} onClick={() => openAuth('offline')}>
-                  Create offline profile
+                <Button variant="primary" size="lg" icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
+                  Connect Microsoft
                 </Button>
-                {MICROSOFT_AUTH_ENABLED ? (
-                  <Button icon={<KeyRound />} onClick={() => openAuth('microsoft')}>
-                    Connect Microsoft
-                  </Button>
-                ) : null}
               </div>
               {MICROSOFT_AUTH_ENABLED && !configured ? (
                 <div className="callout callout--warning" style={{ marginTop: 20 }}>
                   <TriangleAlert />
                   <div>
-                    Microsoft sign-in needs an Azure client ID and Mojang approval. Offline profiles work without it.{' '}
+                    Microsoft sign-in needs an Azure client ID and Mojang approval.{' '}
                     <button type="button" className="link-button" onClick={() => openAuth('microsoft')}>
                       Microsoft setup <ChevronRight />
                     </button>
