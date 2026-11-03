@@ -16,7 +16,7 @@ import {
 import { api, getErrorMessage } from '../lib/api'
 import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { useLauncher } from '../state/LauncherProvider'
-import type { LogFile, LogReadResult, LogsList } from '../lib/types'
+import type { CrashRecord, LogFile, LogReadResult, LogsList } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Button,
@@ -81,6 +81,7 @@ export function LogsPage() {
   const [search, setSearch] = useState('')
   const [exporting, setExporting] = useState(false)
   const [diagnosticFile, setDiagnosticFile] = useState<string | null>(null)
+  const [lastCrash, setLastCrash] = useState<CrashRecord | null>(null)
   const initializedRoute = useRef(false)
   const contentRef = useRef<HTMLPreElement>(null)
   const readRequest = useRef(0)
@@ -182,6 +183,13 @@ export function LogsPage() {
   }, [autoRefresh, loadList, loadContent, selection])
 
   useEffect(() => {
+    void api.crash
+      .last()
+      .then(setLastCrash)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     if (!autoScroll || search) return
     const element = contentRef.current
     if (!element) return
@@ -202,6 +210,14 @@ export function LogsPage() {
     setSearch('')
     setContent(null)
     void loadContent(nextSelection)
+  }
+
+  const openLastCrash = () => {
+    if (!list) return
+    const nextSelection = selectionForCategory(list, 'crash')
+    if (!nextSelection) return
+    setCategory('crash')
+    selectFile(nextSelection)
   }
 
   const refresh = () => {
@@ -294,6 +310,22 @@ export function LogsPage() {
             <div className="mono logs-diagnostic-path">{diagnosticFile}</div>
           </div>
           <CopyButton value={diagnosticFile} label="Copy diagnostics path" />
+        </div>
+      ) : null}
+
+      {lastCrash ? (
+        <div className="callout callout--warning">
+          <AlertTriangle />
+          <div className="grow">
+            <div>{lastCrash.title}</div>
+            <div className="text-dim">
+              {relativeTime(lastCrash.at)} · {lastCrash.category.replace(/-/g, ' ')}
+              {lastCrash.installationName ? ` · ${lastCrash.installationName}` : ''}
+            </div>
+          </div>
+          <Button size="sm" onClick={openLastCrash} disabled={!list}>
+            Open report
+          </Button>
         </div>
       ) : null}
 

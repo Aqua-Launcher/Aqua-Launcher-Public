@@ -5,10 +5,86 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { downloadFiles } from './downloader.js'
-import { ensureDir, fetchJson, fileExists, isPathInside, randomId, uniqueName } from './util.js'
+import { readPackMetadata } from './content-index.js'
+import { atomicWriteJson, ensureDir, fetchJson, fileExists, isPathInside, randomId, readJsonFile, uniqueName } from './util.js'
 
 const API = 'https://api.modrinth.com/v2'
 const MOD_LOADER_CATEGORIES = new Set(['fabric', 'quilt', 'forge', 'neoforge'])
+const PROJECT_ID_PATTERN = /^[A-Za-z0-9_-]{2,64}$/
+const DETAIL_CACHE_MS = 10 * 60 * 1000
+const GAME_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,29}$/
+
+export const SEARCH_SORTS = ['relevance', 'downloads', 'follows', 'newest', 'updated']
+export const SEARCH_ENVIRONMENTS = ['any', 'client', 'server']
+export const SEARCH_LICENSES = [
+  'mit',
+  'apache-2.0',
+  'gpl-3.0',
+  'lgpl-3.0',
+  'mpl-2.0',
+  'bsd-3-clause',
+  'cc0-1.0',
+  'unlicense',
+]
+
+/** Category facets each Modrinth content type accepts, shared with Settings. */
+export const SEARCH_CATEGORIES = {
+  mod: [
+    'optimization',
+    'library',
+    'utility',
+    'technology',
+    'magic',
+    'adventure',
+    'worldgen',
+    'decoration',
+    'storage',
+    'equipment',
+    'mobs',
+    'transportation',
+    'food',
+    'game-mechanics',
+  ],
+  modpack: [
+    'adventure',
+    'combat',
+    'kitchen-sink',
+    'lightweight',
+    'magic',
+    'multiplayer',
+    'optimization',
+    'quests',
+    'technology',
+    'vanilla-like',
+  ],
+  resourcepack: [
+    'blocks',
+    'combat',
+    'decoration',
+    'entities',
+    'environment',
+    'equipment',
+    'gui',
+    'items',
+    'realistic',
+    'simplistic',
+    'themed',
+    'vanilla-like',
+  ],
+  shader: [
+    'cartoon',
+    'fantasy',
+    'realistic',
+    'semi-realistic',
+    'simplistic',
+    'vanilla-like',
+    'atmosphere',
+    'colored-lighting',
+    'shadows',
+    'water',
+  ],
+  datapack: ['adventure', 'decoration', 'worldgen', 'utility', 'technology', 'magic', 'storage', 'game-mechanics'],
+}
 
 /**
  * Modrinth project types that install into a folder inside the game directory.
@@ -18,9 +94,52 @@ const CONTENT_TYPES = {
   mod: { label: 'mod', directory: 'mods', extension: '.jar', needsLoader: true },
   resourcepack: { label: 'resource pack', directory: 'resourcepacks', extension: '.zip', needsLoader: false },
   shader: { label: 'shader pack', directory: 'shaderpacks', extension: '.zip', needsLoader: false },
+  datapack: { label: 'datapack', directory: 'datapacks', extension: '.zip', needsLoader: false, needsWorld: true },
 }
 
-const CONTENT_TYPE_IDS = ['mod', 'modpack', 'resourcepack', 'shader']
+const CONTENT_TYPE_IDS = ['mod', 'modpack', 'resourcepack', 'shader', 'datapack']
+
+const DATAPACK_FORMATS = [
+  ['1.21.7', 81],
+  ['1.21.6', 80],
+  ['1.21.5', 71],
+  ['1.21.4', 61],
+  ['1.21.2', 57],
+  ['1.21', 48],
+  ['1.20.5', 41],
+  ['1.20.3', 26],
+  ['1.20.2', 18],
+  ['1.20', 15],
+  ['1.19.4', 12],
+  ['1.19', 9],
+  ['1.18', 8],
+  ['1.17', 7],
+  ['1.16.2', 6],
+  ['1.16', 5],
+  ['1.15', 4],
+  ['1.14', 4],
+  ['1.13', 4],
+]
+
+export function datapackFormatForVersion(version) {
+  const value = typeof version === 'string' ? version.trim() : ''
+  if (!value) return null
+  const match = DATAPACK_FORMATS.find(([prefix]) => value === prefix || value.startsWith(`${prefix}.`))
+  return match ? match[1] : null
+}
+
+/** A mismatch is advisory: Minecraft can still load a datapack that only needs a newer format. */
+export function datapackCompatibilityWarning(format, minecraftVersion) {
+  if (format == null || !Number.isFinite(Number(format))) {
+    return 'No readable pack.mcmeta pack_format was found.'
+  }
+  const expected = datapackFormatForVersion(minecraftVersion)
+  if (expected == null) return `Could not verify pack_format ${format} for Minecraft ${minecraftVersion}.`
+  if (Number(format) !== expected) {
+    return `This datapack uses pack_format ${format}, but Minecraft ${minecraftVersion} expects ${expected}. It may still work.`
+  }
+  return null
+}
 
 function normalizeContentType(value) {
   const type = typeof value === 'string' && value ? value : 'mod'
@@ -33,8 +152,188 @@ function modrinthLoader(installation) {
   return MOD_LOADER_CATEGORIES.has(type) ? type : null
 }
 
+function validProjectId(value) {
+  const id = typeof value === 'string' ? value.trim() : ''
+  if (!PROJECT_ID_PATTERN.test(id)) throw new Error('That Modrinth project id is invalid.')
+  return id
+}
+
+function clip(value, length) {
+  return typeof value === 'string' ? value.slice(0, length) : ''
+}
+
+function httpUrl(value) {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+export function normalizeProjectDetail(raw) {
+  if (!raw || typeof raw !== 'object' || !raw.id) return null
+  const license = raw.license && typeof raw.license === 'object' ? raw.license : null
+  const gallery = Array.isArray(raw.gallery)
+    ? raw.gallery
+        .map((image) => ({
+          url: httpUrl(image?.url),
+          title: clip(image?.title, 200) || null,
+          description: clip(image?.description, 500) || null,
+          featured: image?.featured === true,
+        }))
+        .filter((image) => image.url)
+        .slice(0, 8)
+    : []
+  return {
+    id: String(raw.id),
+    slug: clip(raw.slug, 80) || null,
+    title: clip(raw.title, 200) || 'Modrinth project',
+    description: clip(raw.description, 1_000),
+    body: clip(raw.body, 80_000),
+    iconUrl: httpUrl(raw.icon_url),
+    author: null,
+    downloads: Number(raw.downloads) || 0,
+    followers: Number(raw.followers) || 0,
+    categories: Array.isArray(raw.categories)
+      ? raw.categories.filter((entry) => typeof entry === 'string').slice(0, 20)
+      : [],
+    projectType: clip(raw.project_type, 40) || null,
+    clientSide: clip(raw.client_side, 20) || null,
+    serverSide: clip(raw.server_side, 20) || null,
+    license: license
+      ? {
+          id: clip(license.id, 80) || null,
+          name: clip(license.name, 200) || null,
+          url: httpUrl(license.url),
+        }
+      : null,
+    sourceUrl: httpUrl(raw.source_url),
+    issuesUrl: httpUrl(raw.issues_url),
+    wikiUrl: httpUrl(raw.wiki_url),
+    discordUrl: httpUrl(raw.discord_url),
+    gallery,
+    published: clip(raw.published, 40) || null,
+    updated: clip(raw.updated, 40) || null,
+  }
+}
+
+export function normalizeVersion(raw) {
+  if (!raw || typeof raw !== 'object' || !raw.id) return null
+  return {
+    id: String(raw.id),
+    name: clip(raw.name, 200) || clip(raw.version_number, 80) || 'Version',
+    versionNumber: clip(raw.version_number, 80),
+    versionType: clip(raw.version_type, 20) || 'release',
+    gameVersions: Array.isArray(raw.game_versions)
+      ? raw.game_versions.filter((entry) => typeof entry === 'string').slice(0, 30)
+      : [],
+    loaders: Array.isArray(raw.loaders) ? raw.loaders.filter((entry) => typeof entry === 'string') : [],
+    datePublished: clip(raw.date_published, 40) || null,
+    downloads: Number(raw.downloads) || 0,
+    changelog: clip(raw.changelog, 20_000),
+    files: Array.isArray(raw.files)
+      ? raw.files
+          .map((file) => ({
+            url: httpUrl(file?.url),
+            filename: clip(file?.filename, 260),
+            size: Number(file?.size) || 0,
+            primary: file?.primary === true,
+          }))
+          .filter((file) => file.url && file.filename)
+          .slice(0, 10)
+      : [],
+    dependencies: Array.isArray(raw.dependencies)
+      ? raw.dependencies
+          .map((dependency) => ({
+            projectId: clip(dependency?.project_id, 80) || null,
+            versionId: clip(dependency?.version_id, 80) || null,
+            dependencyType: clip(dependency?.dependency_type, 20) || 'required',
+          }))
+          .filter((dependency) => dependency.projectId)
+          .slice(0, 30)
+      : [],
+  }
+}
+
+export function filterVersions(versions, { gameVersion = null, loader = null } = {}) {
+  const list = Array.isArray(versions) ? versions.filter((version) => version && version.id) : []
+  return list
+    .filter((version) => !gameVersion || version.gameVersions.includes(gameVersion))
+    .filter(
+      (version) =>
+        !loader || version.loaders.some((entry) => String(entry).toLowerCase() === String(loader).toLowerCase()),
+    )
+    .sort((a, b) => new Date(b.datePublished || 0).getTime() - new Date(a.datePublished || 0).getTime())
+}
+
+/** Validate the persisted, non-profile filters stored in `settings.contentFilters`. */
+export function normalizeContentFilters(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {}
+  const result = {}
+  for (const type of CONTENT_TYPE_IDS) {
+    const entry = source[type]
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const allowed = SEARCH_CATEGORIES[type] || []
+    result[type] = {
+      categories: Array.isArray(entry.categories)
+        ? [...new Set(entry.categories.filter((category) => allowed.includes(category)))].slice(0, 8)
+        : [],
+      environment: SEARCH_ENVIRONMENTS.includes(entry.environment) ? entry.environment : 'any',
+      license: SEARCH_LICENSES.includes(entry.license) ? entry.license : null,
+      openSource: entry.openSource === true,
+      sort: SEARCH_SORTS.includes(entry.sort) ? entry.sort : 'relevance',
+    }
+  }
+  return result
+}
+
+/** Validate one search request. Profile version/loader defaults are applied by `search`. */
+export function normalizeSearchFilters({
+  contentType = 'mod',
+  sort = 'relevance',
+  categories = [],
+  environment = 'any',
+  license = null,
+  openSource = false,
+  gameVersion = null,
+  loader = null,
+} = {}) {
+  const type = normalizeContentType(contentType)
+  const allowed = SEARCH_CATEGORIES[type] || []
+  return {
+    contentType: type,
+    sort: SEARCH_SORTS.includes(sort) ? sort : 'relevance',
+    categories: Array.isArray(categories)
+      ? [...new Set(categories.filter((category) => typeof category === 'string' && allowed.includes(category)))].slice(0, 8)
+      : [],
+    environment: SEARCH_ENVIRONMENTS.includes(environment) ? environment : 'any',
+    license: SEARCH_LICENSES.includes(license) ? license : null,
+    openSource: openSource === true,
+    gameVersion:
+      type !== 'modpack' && typeof gameVersion === 'string' && GAME_VERSION_PATTERN.test(gameVersion.trim())
+        ? gameVersion.trim()
+        : null,
+    loader: type === 'mod' && MOD_LOADER_CATEGORIES.has(loader) ? loader : null,
+  }
+}
+
+/** Modrinth facets are ANDed between groups and ORed inside each group. */
+export function buildSearchFacets(filters) {
+  const facets = [[`project_type:${filters.contentType}`]]
+  if (filters.categories.length) facets.push(filters.categories.map((category) => `categories:${category}`))
+  if (filters.loader) facets.push([`categories:${filters.loader}`])
+  if (filters.gameVersion) facets.push([`versions:${filters.gameVersion}`])
+  if (filters.environment === 'client') facets.push(['client_side:required', 'client_side:optional'])
+  if (filters.environment === 'server') facets.push(['server_side:required', 'server_side:optional'])
+  if (filters.license) facets.push([`license:${filters.license}`])
+  if (filters.openSource) facets.push(['open_source:true'])
+  return facets
+}
+
 /** Modpacks declare their loader in `dependencies`, e.g. `fabric-loader` or `neoforge`. */
-function resolvePackLoader(dependencies) {
+export function resolvePackLoader(dependencies) {
   const candidates = [
     ['fabric', dependencies['fabric-loader']],
     ['quilt', dependencies['quilt-loader']],
@@ -70,12 +369,13 @@ async function sha1OfFile(filePath) {
 }
 
 export class ModrinthService {
-  constructor({ logger, installationService = null, jobManager = null, store = null, paths = null }) {
+  constructor({ logger, installationService = null, jobManager = null, store = null, paths = null, loaderService = null }) {
     this.logger = logger
     this.installationService = installationService
     this.jobManager = jobManager
     this.store = store
     this.paths = paths
+    this.loaderService = loaderService
   }
 
   headers() {
@@ -91,17 +391,41 @@ export class ModrinthService {
   }
 
   contentDirectory(installation, contentType) {
+    return this.contentDirectoryForWorld(installation, contentType, null)
+  }
+
+  worldDirectory(installation, worldFolder) {
+    const saves = path.join(installation.gameDir, 'saves')
+    if (typeof worldFolder !== 'string' || !worldFolder.trim() || worldFolder !== path.basename(worldFolder)) {
+      throw new Error('Choose a world before installing a datapack.')
+    }
+    const directory = path.resolve(saves, worldFolder)
+    if (!isPathInside(directory, saves)) throw new Error('That world is outside the saves folder.')
+    return directory
+  }
+
+  async requireWorld(installation, worldFolder) {
+    const directory = this.worldDirectory(installation, worldFolder)
+    const stat = await fsp.stat(directory).catch(() => null)
+    if (!stat?.isDirectory()) throw new Error('That world no longer exists.')
+    return directory
+  }
+
+  contentDirectoryForWorld(installation, contentType, worldFolder = null) {
     const type = normalizeContentType(contentType)
     const spec = CONTENT_TYPES[type]
     if (!spec) throw new Error('Modpacks do not install into a folder.')
+    if (spec.needsWorld) {
+      return path.join(this.worldDirectory(installation, worldFolder), spec.directory)
+    }
     return path.join(installation.gameDir, spec.directory)
   }
 
   /** Reject anything that is not a plain file name inside the content folder. */
-  resolveContentFile(installation, contentType, filename) {
+  resolveContentFile(installation, contentType, filename, worldFolder = null) {
     if (typeof filename !== 'string' || !filename.trim()) throw new Error('A file name is required.')
     if (filename !== path.basename(filename)) throw new Error('That file is outside the content folder.')
-    const directory = this.contentDirectory(installation, contentType)
+    const directory = this.contentDirectoryForWorld(installation, contentType, worldFolder)
     const target = path.resolve(directory, filename)
     if (!isPathInside(target, directory)) throw new Error('That file is outside the content folder.')
     return target
@@ -111,27 +435,30 @@ export class ModrinthService {
     return this.resolveContentFile(installation, 'mod', filename)
   }
 
-  async search(installation, { query = '', offset = 0, limit = 20, contentType = 'mod' } = {}) {
-    const type = normalizeContentType(contentType)
+  async search(installation, { query = '', offset = 0, limit = 20, ...options } = {}) {
+    const filters = normalizeSearchFilters(options)
+    const type = filters.contentType
     // Modpacks carry their own Minecraft version and loader — installing one creates a
     // profile — so they can be browsed before any installation exists.
     if (type !== 'modpack' && !installation) {
       throw new Error('Choose an installation before browsing this content.')
     }
-    const facets = [[`project_type:${type}`]]
+
+    const hasLoader = Object.prototype.hasOwnProperty.call(options, 'loader')
+    const hasGameVersion = Object.prototype.hasOwnProperty.call(options, 'gameVersion')
     let loader = null
     if (type === 'mod') {
-      loader = this.ensureModdable(installation)
-      facets.push([`categories:${loader}`])
+      const profileLoader = this.ensureModdable(installation)
+      loader = hasLoader ? filters.loader : profileLoader
     }
-    // Modpacks ship their own Minecraft version and loader, so they are not filtered
-    // by the currently selected installation.
-    if (type !== 'modpack') facets.push([`versions:${installation.versionId}`])
+    const gameVersion = type !== 'modpack' ? (hasGameVersion ? filters.gameVersion : installation.versionId) : null
+    const requested = { ...filters, loader, gameVersion }
+    const facets = buildSearchFacets(requested)
 
     const params = new URLSearchParams({
       query: String(query || '').slice(0, 120),
       facets: JSON.stringify(facets),
-      index: 'relevance',
+      index: requested.sort,
       limit: String(Math.min(Math.max(Number(limit) || 20, 1), 40)),
       offset: String(Math.max(Number(offset) || 0, 0)),
     })
@@ -143,7 +470,12 @@ export class ModrinthService {
       offset: Number(payload?.offset) || 0,
       limit: Number(payload?.limit) || hits.length,
       loader,
-      minecraftVersion: type === 'modpack' ? null : installation.versionId,
+      minecraftVersion: gameVersion,
+      sort: requested.sort,
+      categories: requested.categories,
+      environment: requested.environment,
+      license: requested.license,
+      openSource: requested.openSource,
       hits: hits.map((hit) => ({
         id: hit.project_id,
         slug: hit.slug,
@@ -174,15 +506,68 @@ export class ModrinthService {
     return Array.isArray(list) ? list : []
   }
 
-  async install(installation, { projectId, versionId = null, contentType = 'mod' } = {}) {
+  cacheFile(name) {
+    return this.paths ? path.join(this.paths.cacheRoot, 'modrinth', name) : null
+  }
+
+  async cached(name, load) {
+    const file = this.cacheFile(name)
+    const cached = file ? await readJsonFile(file, null) : null
+    if (cached?.savedAt && Date.now() - cached.savedAt < DETAIL_CACHE_MS && cached.data) return cached.data
+    try {
+      const data = await load()
+      if (file) {
+        await ensureDir(path.dirname(file))
+        await atomicWriteJson(file, { savedAt: Date.now(), data })
+      }
+      return data
+    } catch (error) {
+      // A stale copy is better than an empty drawer while Modrinth is unavailable.
+      if (cached?.data) return cached.data
+      throw error
+    }
+  }
+
+  async getProject(projectId) {
+    const id = validProjectId(projectId)
+    return this.cached(`project-${id}.json`, async () => {
+      const payload = await fetchJson(`${API}/project/${encodeURIComponent(id)}`, { headers: this.headers() }, {
+        logger: this.logger,
+      })
+      const project = normalizeProjectDetail(payload)
+      if (!project) throw new Error('Modrinth returned an incomplete project.')
+      return project
+    })
+  }
+
+  async getVersions(projectId, { gameVersion = null, loader = null } = {}) {
+    const id = validProjectId(projectId)
+    const all = await this.cached(`versions-${id}.json`, async () => {
+      const payload = await fetchJson(
+        `${API}/project/${encodeURIComponent(id)}/version`,
+        { headers: this.headers() },
+        { logger: this.logger },
+      )
+      // Cap the list: a drawer never needs hundreds of historical files.
+      const list = Array.isArray(payload) ? payload.slice(0, 300) : []
+      return list.map(normalizeVersion).filter(Boolean)
+    })
+    return filterVersions(all, {
+      gameVersion: typeof gameVersion === 'string' ? gameVersion : null,
+      loader: typeof loader === 'string' ? loader : null,
+    })
+  }
+
+  async install(installation, { projectId, versionId = null, contentType = 'mod', worldFolder = null } = {}) {
     const type = normalizeContentType(contentType)
     const spec = CONTENT_TYPES[type]
     if (!spec) throw new Error('Modpacks are installed as their own installation.')
     if (!projectId) throw new Error(`Choose a ${spec.label} to install.`)
 
-    const loader = spec.needsLoader ? this.ensureModdable(installation) : modrinthLoader(installation)
+    const loader = spec.needsLoader ? this.ensureModdable(installation) : null
     const minecraftVersion = installation.versionId
-    const contentDir = this.contentDirectory(installation, type)
+    if (spec.needsWorld) await this.requireWorld(installation, worldFolder)
+    const contentDir = this.contentDirectoryForWorld(installation, type, worldFolder)
     await ensureDir(contentDir)
 
     const candidates = await this.versions(projectId, {
@@ -232,7 +617,7 @@ export class ModrinthService {
     for (const entry of queue) {
       downloads.push({
         url: entry.file.url,
-        destination: this.resolveContentFile(installation, type, entry.file.filename),
+        destination: this.resolveContentFile(installation, type, entry.file.filename, worldFolder),
         sha1: entry.file.sha1,
         size: entry.file.size,
       })
@@ -254,6 +639,16 @@ export class ModrinthService {
       files: downloads.length,
     })
 
+    const warnings = []
+    if (type === 'datapack') {
+      for (const entry of queue) {
+        const filePath = this.resolveContentFile(installation, type, entry.file.filename, worldFolder)
+        const metadata = readPackMetadata(filePath)
+        const warning = datapackCompatibilityWarning(metadata?.format, installation.versionId)
+        if (warning) warnings.push(`${entry.file.filename}: ${warning}`)
+      }
+    }
+
     return {
       contentType: type,
       installed: queue.map((entry) => ({
@@ -264,6 +659,7 @@ export class ModrinthService {
         filename: entry.file.filename,
       })),
       skipped,
+      warnings,
     }
   }
 
@@ -309,7 +705,8 @@ export class ModrinthService {
     }
   }
 
-  async installModpackArchive(archivePath, chosenVersion, packProject = null) {
+  async installModpackArchive(archivePath, chosenVersion, packProject = null, options = {}) {
+    const { signal = null, onProgress = () => {} } = options
     let zip
     try {
       zip = new AdmZip(archivePath)
@@ -325,10 +722,29 @@ export class ModrinthService {
       throw new Error('The modpack manifest could not be read.')
     }
 
+    if (Number(index?.formatVersion) !== 1) {
+      throw new Error('Only .mrpack format version 1 is supported.')
+    }
+    if (!Array.isArray(index.files)) throw new Error('The modpack manifest has no files list.')
+
     const dependencies = index?.dependencies && typeof index.dependencies === 'object' ? index.dependencies : {}
     const minecraftVersion = typeof dependencies.minecraft === 'string' ? dependencies.minecraft.trim() : ''
     if (!minecraftVersion) throw new Error('The modpack does not specify a Minecraft version.')
     const loader = resolvePackLoader(dependencies)
+    if (loader.type !== 'vanilla') {
+      if (!loader.version) throw new Error(`The modpack does not specify a ${loader.type} loader version.`)
+      if (this.loaderService) {
+        let versions = []
+        try {
+          versions = await this.loaderService.listVersions(loader.type, minecraftVersion)
+        } catch (error) {
+          throw new Error(`Could not check ${loader.type} loader versions: ${error.message}`)
+        }
+        if (Array.isArray(versions) && versions.length && !versions.some((entry) => entry.version === loader.version)) {
+          throw new Error(`Minecraft ${minecraftVersion} has no ${loader.type} loader ${loader.version}.`)
+        }
+      }
+    }
 
     const packVersion = typeof index.versionId === 'string' ? index.versionId : chosenVersion?.version_number || ''
     const preferredName =
@@ -337,6 +753,10 @@ export class ModrinthService {
       preferredName.trim().slice(0, 48),
       this.store?.installations?.map((installation) => installation.name) || [],
     )
+
+    if (signal?.aborted) {
+      throw Object.assign(new Error('Modpack import cancelled.'), { name: 'AbortError' })
+    }
 
     // Validate file paths before creating anything so a malformed pack cannot
     // leave a half-made installation behind.
@@ -372,6 +792,7 @@ export class ModrinthService {
         : null,
     })
 
+    try {
     const overrides = await this.extractPackOverrides(zip, installation.gameDir)
     const downloads = packFiles.map((entry) => ({
       url: entry.url,
@@ -381,7 +802,13 @@ export class ModrinthService {
     }))
 
     if (downloads.length) {
-      await downloadFiles(downloads, { concurrency: 6, logger: this.logger, attempts: 3 })
+      await downloadFiles(downloads, {
+        concurrency: 6,
+        logger: this.logger,
+        attempts: 3,
+        signal,
+        onProgress: (update) => onProgress({ stage: 'Downloading pack files', ...update }),
+      })
     }
 
     // Game files (Minecraft, loader profile, libraries) still need downloading.
@@ -408,6 +835,13 @@ export class ModrinthService {
         overrides,
       },
     }
+    } catch (error) {
+      await this.installationService.remove(installation.id).catch(() => {})
+      if (installation.managedGameDir) {
+        await fsp.rm(installation.gameDir, { recursive: true, force: true }).catch(() => {})
+      }
+      throw error
+    }
   }
 
   /** Copies `overrides/` and `client-overrides/` out of an .mrpack into the game directory. */
@@ -420,7 +854,9 @@ export class ModrinthService {
       const relative = match[1]
       if (!relative || relative.endsWith('/') || relative.includes('\0')) continue
       const destination = path.resolve(gameDir, relative)
-      if (!isPathInside(destination, gameDir)) continue
+      if (!isPathInside(destination, gameDir)) {
+        throw new Error('That modpack override tries to write outside the game folder.')
+      }
       await ensureDir(path.dirname(destination))
       await fsp.writeFile(destination, entry.getData())
       written += 1
@@ -428,11 +864,11 @@ export class ModrinthService {
     return written
   }
 
-  async listInstalled(installation, contentType = 'mod') {
+  async listInstalled(installation, contentType = 'mod', worldFolder = null) {
     const type = normalizeContentType(contentType)
     const spec = CONTENT_TYPES[type]
     if (!spec) return { contentType: type, directory: null, items: [] }
-    const directory = this.contentDirectory(installation, type)
+    const directory = this.contentDirectoryForWorld(installation, type, worldFolder)
     let entries = []
     try {
       entries = await fsp.readdir(directory, { withFileTypes: true })
@@ -527,11 +963,11 @@ export class ModrinthService {
    * Mods go through the batch endpoint; packs and shaders are looked up per
    * project because their version loaders are not tied to the mod loader.
    */
-  async checkUpdates(installation, contentType = 'mod') {
+  async checkUpdates(installation, contentType = 'mod', worldFolder = null) {
     const type = normalizeContentType(contentType)
     const spec = CONTENT_TYPES[type]
     if (!spec) throw new Error('Modpacks are updated by installing a new pack version.')
-    const installed = await this.listInstalled(installation, type)
+    const installed = await this.listInstalled(installation, type, worldFolder)
     const candidates = installed.items.filter(
       (item) => item.enabled && item.matched && item.sha1 && item.projectId && item.versionId,
     )
@@ -616,12 +1052,12 @@ export class ModrinthService {
   }
 
   /** Replaces one installed content file with a specific Modrinth version. */
-  async update(installation, { filename, versionId, contentType = 'mod' } = {}) {
+  async update(installation, { filename, versionId, contentType = 'mod', worldFolder = null } = {}) {
     const type = normalizeContentType(contentType)
     const spec = CONTENT_TYPES[type]
     if (!spec) throw new Error('Modpacks are installed as their own profile.')
     if (!versionId || typeof versionId !== 'string') throw new Error('Choose an update to install.')
-    const currentPath = this.resolveContentFile(installation, type, filename)
+    const currentPath = this.resolveContentFile(installation, type, filename, worldFolder)
     if (!(await fileExists(currentPath))) throw new Error('That content file is no longer on disk.')
 
     const version = await fetchJson(
@@ -646,7 +1082,7 @@ export class ModrinthService {
     }
     const disabled = filename.endsWith('.disabled')
     const destinationName = disabled ? `${file.filename}.disabled` : file.filename
-    const destination = this.resolveContentFile(installation, type, destinationName)
+    const destination = this.resolveContentFile(installation, type, destinationName, worldFolder)
     await ensureDir(path.dirname(destination))
     await downloadFiles([{ url: file.url, destination, sha1: file.sha1, size: file.size }], {
       concurrency: 1,
@@ -673,18 +1109,18 @@ export class ModrinthService {
     }
   }
 
-  async toggle(installation, filename, contentType = 'mod') {
-    const target = this.resolveContentFile(installation, contentType, filename)
+  async toggle(installation, filename, contentType = 'mod', worldFolder = null) {
+    const target = this.resolveContentFile(installation, contentType, filename, worldFolder)
     if (!(await fileExists(target))) throw new Error('That file is no longer on disk.')
-    const directory = this.contentDirectory(installation, contentType)
+    const directory = this.contentDirectoryForWorld(installation, contentType, worldFolder)
     const next = filename.endsWith('.disabled') ? target.slice(0, -'.disabled'.length) : `${target}.disabled`
     if (!isPathInside(next, directory)) throw new Error('That file is outside the content folder.')
     await fsp.rename(target, next)
     return { filename: path.basename(next), enabled: !path.basename(next).endsWith('.disabled') }
   }
 
-  async remove(installation, filename, contentType = 'mod') {
-    const target = this.resolveContentFile(installation, contentType, filename)
+  async remove(installation, filename, contentType = 'mod', worldFolder = null) {
+    const target = this.resolveContentFile(installation, contentType, filename, worldFolder)
     await fsp.rm(target, { force: true })
     return { filename }
   }

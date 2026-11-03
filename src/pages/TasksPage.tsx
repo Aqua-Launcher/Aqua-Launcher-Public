@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import {
+  Archive,
+  Boxes,
   Coffee,
   Database,
   Download,
@@ -26,7 +28,17 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { Badge, Button, EmptyState, IconButton, ProgressBar, cx } from '../components/ui/primitives'
 
 /** Every kind of work the launcher runs in the background, plus launch preparation. */
-type TaskKind = 'install' | 'java' | 'horizon' | 'native' | 'bedrock' | 'storage' | 'launch'
+type TaskKind =
+  | 'install'
+  | 'java'
+  | 'backup'
+  | 'modpack-import'
+  | 'launcher-import'
+  | 'horizon'
+  | 'native'
+  | 'bedrock'
+  | 'storage'
+  | 'launch'
 type TaskState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 interface LauncherTask {
@@ -53,6 +65,9 @@ interface LauncherTask {
 const KIND_ICON: Record<TaskKind, typeof Download> = {
   install: Download,
   java: Coffee,
+  backup: Archive,
+  'modpack-import': Boxes,
+  'launcher-import': Boxes,
   horizon: HardDrive,
   native: Hammer,
   bedrock: Layers,
@@ -124,7 +139,16 @@ export function TasksPage() {
       const active = job.status === 'running' || job.status === 'queued'
       list.push({
         id: `job-${job.id}`,
-        kind: job.type === 'java' ? 'java' : 'install',
+        kind:
+          job.type === 'java'
+            ? 'java'
+            : job.type === 'backup'
+              ? 'backup'
+              : job.type === 'modpack-import'
+                ? 'modpack-import'
+                : job.type === 'launcher-import'
+                  ? 'launcher-import'
+                  : 'install',
         title: job.title,
         subtitle: job.subtitle,
         state: job.status,
@@ -331,7 +355,9 @@ export function TasksPage() {
         <section className="tasks-section">
           <div className="tasks-section__head">
             <h2 className="download-section__title">In progress</h2>
-            <span className="text-dim">{active.length} running</span>
+            <span className="text-dim" role="status" aria-live="polite">
+              {active.length} running
+            </span>
           </div>
           <div className="tasks-board">
             {active.map((task) => (

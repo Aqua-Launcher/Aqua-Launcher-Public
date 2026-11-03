@@ -1,10 +1,21 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } from 'electron'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { normalizeSettings, validateSettings } from './core/settings.js'
+import { analyzeCrash } from './core/crash-analysis.js'
 import { normalizeServerAddress } from './core/servers.js'
 import { getPlatformLabel, getSystemInfo } from './core/system.js'
 import { ensureDir, isAllowedExternalUrl, isPathInside } from './core/util.js'
+import { findConflicts } from './core/content-conflicts.js'
+import { runImports } from './core/content-import.js'
+import { buildPlaytimeStats, sessionsToCsv } from './core/stats.js'
+
+const CONTENT_INDEX_TYPES = {
+  mod: 'mods',
+  resourcepack: 'resourcepacks',
+  shader: 'shaderpacks',
+  datapack: 'datapacks',
+}
 
 function requireString(value, label, maxLength = 4096) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label} is required.`)
@@ -19,13 +30,35 @@ function requireObject(value, label) {
 
 function mergeSettings(current, patch) {
   const merged = { ...current, ...patch }
-  for (const key of ['java', 'memory', 'downloads', 'window', 'startup', 'logging', 'minecraftSettings']) {
+  for (const key of [
+    'java',
+    'memory',
+    'downloads',
+    'window',
+    'startup',
+    'logging',
+    'minecraftSettings',
+    'backups',
+    'discord',
+  ]) {
     if (patch[key] !== undefined) {
       merged[key] = { ...current[key], ...requireObject(patch[key], key) }
     }
   }
   // Custom theme surfaces merge one level deeper so a patch can update a single
   // surface without dropping the other two.
+  if (patch.notifications !== undefined) {
+    const next = requireObject(patch.notifications, 'Notifications')
+    const currentLevels = current.notifications?.levels || {}
+    merged.notifications = {
+      ...(current.notifications || {}),
+      ...next,
+      levels: {
+        ...currentLevels,
+        ...(next.levels && typeof next.levels === 'object' ? next.levels : {}),
+      },
+    }
+  }
   if (patch.customTheme !== undefined) {
     const next = requireObject(patch.customTheme, 'Custom theme')
     const existing = current.customTheme || {}
@@ -46,12 +79,17 @@ export function registerIpc({
   logger,
   versionService,
   artworkService,
+  docImageService,
   loaderService,
   modrinthService,
+  modpackImportService,
+  launcherImportService,
+  modpackExportService,
   modRetargetService,
   minecraftSettingsService,
   worldsService,
   serverService,
+  lanDiscovery,
   bedrockService,
   bedrockVersionsService,
   bedrockAddonsService,
@@ -61,17 +99,24 @@ export function registerIpc({
   installationService,
   accountManager,
   javaService,
+  healthService,
+  contentIndexService,
   jobManager,
   gameManager,
+  backupScheduler,
+  discordPresence,
   logService,
   blockTextureService,
   storageService,
+  screenshotService,
   emitInstallations,
   emitActivity,
   emitSettings,
   applyStartupSettings,
   applyUiScale,
   getMainWindow,
+  linkService,
+  onRendererReady,
 }) {
   const senderWindow = (event) => BrowserWindow.fromWebContents(event.sender)
   const requireInstallation = (id) => {
@@ -88,15 +133,20 @@ export function registerIpc({
         version: app.getVersion(),
         packaged: app.isPackaged,
         platform: getPlatformLabel(),
-        canLaunchAtLogin: app.isPackaged,
+        canLaunchAtLogin: app.isPackaged && !paths.portable,
+        portable: paths.portable,
+        portableSource: paths.portableSource,
+        portableWarning: paths.portableWarning,
       },
       settings: store.settings,
+      notifications: store.notifications,
       installations,
       accounts: accountManager.accountsPayload(),
       activity: store.activity,
       sessions: store.sessions,
       jobs: jobManager.list(),
       game: gameManager.getState(),
+      backups: backupScheduler.status(),
       auth: accountManager.getAuthState(),
       versions: versionService.getCachedManifestSync(),
       system: getSystemInfo(paths),
@@ -120,6 +170,14 @@ export function registerIpc({
     await shell.openExternal(value)
     return true
   })
+
+  ipcMain.handle('app:rendererReady', async () => {
+    onRendererReady?.()
+    return true
+  })
+
+  ipcMain.handle('app:linkStatus', async () => linkService.status())
+  ipcMain.handle('app:registerLinks', async () => linkService.register())
 
   ipcMain.handle('app:rendererError', async (_event, payload) => {
     logger.error('Renderer error', {
@@ -169,6 +227,12 @@ export function registerIpc({
     return artworkService.getVersionArt(typeof versionId === 'string' ? versionId.slice(0, 64) : '')
   })
 
+  // README and ROADMAP images are bundled documents, so the main process fetches
+  // them and returns a data URL; the renderer keeps its narrow img-src policy.
+  ipcMain.handle('docs:image', async (_event, { url } = {}) => {
+    return docImageService.load(requireString(url, 'Image address', 2048))
+  })
+
   ipcMain.handle('installations:list', async () => installationService.list())
 
   ipcMain.handle('installations:get', async (_event, { id }) => {
@@ -189,6 +253,13 @@ export function registerIpc({
     )
     await emitInstallations()
     emitActivity()
+    return result
+  })
+
+  ipcMain.handle('installations:reorder', async (_event, { ids } = {}) => {
+    if (!Array.isArray(ids)) throw new Error('Choose a new installation order.')
+    const result = await installationService.reorder(ids)
+    await emitInstallations()
     return result
   })
 
@@ -227,26 +298,144 @@ export function registerIpc({
     return installation.gameDir
   })
 
+  ipcMain.handle('notifications:list', async () => store.notifications)
+  ipcMain.handle('notifications:markRead', async (_event, { ids = null } = {}) => {
+    const selected = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string').slice(0, 50) : null
+    return store.markNotificationsRead(selected)
+  })
+  ipcMain.handle('notifications:clear', async () => store.clearNotifications())
+
+  ipcMain.handle('stats:summary', async () =>
+    buildPlaytimeStats({
+      sessions: store.sessions,
+      installations: store.installations,
+      crashes: store.crashes,
+    }),
+  )
+
+  ipcMain.handle('stats:exportCsv', async (event) => {
+    const { csv, rows } = sessionsToCsv({ sessions: store.sessions, installations: store.installations })
+    if (!rows) throw new Error('There are no play sessions to export yet.')
+    const result = await dialog.showSaveDialog(senderWindow(event), {
+      title: 'Export playtime',
+      defaultPath: path.join(
+        app.getPath('documents'),
+        `aqua-playtime-${new Date().toISOString().slice(0, 10)}.csv`,
+      ),
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    await fsp.writeFile(result.filePath, `\uFEFF${csv}`, 'utf8')
+    return { path: result.filePath, rows }
+  })
+
   ipcMain.handle('settings:update', async (_event, patch) => {
     const input = requireObject(patch, 'Settings')
     const merged = mergeSettings(store.settings, input)
     const normalized = normalizeSettings(merged, store.defaults)
     const system = getSystemInfo(paths)
     const validated = await validateSettings(normalized, { totalMemMb: system.totalMemMb })
+    if (paths.portable) {
+      // Portable mode must not create a Windows login item, even if an older
+      // settings file or another surface still asks for one.
+      validated.startup = { ...validated.startup, launchAtLogin: false }
+    }
     if (validated.java.mode === 'path' && validated.java.path) {
       const info = await javaService.validateJavaPath(validated.java.path)
       validated.java.path = info.path
     }
     const previous = store.settings
     await store.replaceSettings(validated)
+    discordPresence?.applySettings(validated.discord)
     logger.setLevel(validated.logging.level)
     if (previous.uiScale !== validated.uiScale) applyUiScale(validated.uiScale)
     if (JSON.stringify(previous.startup) !== JSON.stringify(validated.startup)) {
       await applyStartupSettings(validated)
     }
     emitSettings(validated)
+    void backupScheduler.check?.()
     logger.info('Settings updated')
     return validated
+  })
+
+  ipcMain.handle('screenshots:list', async (_event, { installationId } = {}) => {
+    return screenshotService.list(requireInstallation(installationId))
+  })
+
+  ipcMain.handle('screenshots:thumbnail', async (_event, { installationId, filename, size = 480 } = {}) => {
+    const installation = requireInstallation(installationId)
+    return screenshotService.thumbnail(installation, requireString(filename, 'Screenshot', 255), size)
+  })
+
+  ipcMain.handle('screenshots:open', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const target = screenshotService.sourcePath(installation, requireString(filename, 'Screenshot', 255))
+    await fsp.access(target)
+    const error = await shell.openPath(target)
+    if (error) throw new Error(error)
+    return target
+  })
+
+  ipcMain.handle('screenshots:reveal', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const target = screenshotService.sourcePath(installation, requireString(filename, 'Screenshot', 255))
+    await fsp.access(target)
+    shell.showItemInFolder(target)
+    return target
+  })
+
+  ipcMain.handle('screenshots:copy', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const target = screenshotService.sourcePath(installation, requireString(filename, 'Screenshot', 255))
+    const image = nativeImage.createFromPath(target)
+    if (!image || image.isEmpty()) throw new Error('This screenshot could not be copied.')
+    clipboard.writeImage(image)
+    return { filename }
+  })
+
+  ipcMain.handle('screenshots:openFolder', async (_event, { installationId } = {}) => {
+    const installation = requireInstallation(installationId)
+    const target = screenshotService.directoryFor(installation)
+    await ensureDir(target)
+    const error = await shell.openPath(target)
+    if (error) throw new Error(error)
+    return target
+  })
+
+  ipcMain.handle('screenshots:delete', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    return screenshotService.delete(installation, requireString(filename, 'Screenshot', 255))
+  })
+
+  ipcMain.handle('screenshots:setBackground', async (_event, { installationId, filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const previous = store.settings.dashboardBackground
+    const result = await screenshotService.setAsBackground(
+      installation,
+      requireString(filename, 'Screenshot', 255),
+    )
+    try {
+      await store.replaceSettings({ ...store.settings, dashboardBackground: result.path })
+    } catch (error) {
+      await screenshotService.removeBackground(result.path)
+      throw error
+    }
+    if (previous && previous !== result.path) await screenshotService.removeBackground(previous)
+    emitSettings(store.settings)
+    return { ...result, settings: store.settings }
+  })
+
+  ipcMain.handle('screenshots:clearBackground', async () => {
+    const previous = store.settings.dashboardBackground
+    const settings = { ...store.settings, dashboardBackground: null }
+    await store.replaceSettings(settings)
+    await screenshotService.removeBackground(previous)
+    emitSettings(settings)
+    return settings
+  })
+
+  ipcMain.handle('screenshots:background', async () => {
+    return { dataUrl: await screenshotService.backgroundDataUrl(store.settings.dashboardBackground) }
   })
 
   ipcMain.handle('accounts:list', async () => accountManager.accountsPayload())
@@ -342,22 +531,88 @@ export function registerIpc({
 
   ipcMain.handle('minecraftSettings:applyAll', async () => minecraftSettingsService.applyToAll())
 
-  ipcMain.handle('mods:search', async (_event, { installationId, query = '', offset = 0, limit = 20, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:search', async (_event, {
+    installationId,
+    query = '',
+    offset = 0,
+    limit = 20,
+    contentType = 'mod',
+    sort = 'relevance',
+    categories = [],
+    environment = 'any',
+    license = null,
+    openSource = false,
+    gameVersion = null,
+    loader = null,
+  } = {}) => {
     // Modpacks are their own profile, so browsing them must not need a selected one.
     const installation = contentType === 'modpack' ? null : requireInstallation(installationId)
-    return modrinthService.search(installation, { query, offset, limit, contentType })
+    return modrinthService.search(installation, {
+      query,
+      offset,
+      limit,
+      contentType,
+      sort,
+      categories,
+      environment,
+      license,
+      openSource,
+      gameVersion,
+      loader,
+    })
   })
 
-  ipcMain.handle('mods:list', async (_event, { installationId, contentType = 'mod' } = {}) => {
-    return modrinthService.listInstalled(requireInstallation(installationId), contentType)
+  ipcMain.handle('mods:list', async (_event, { installationId, contentType = 'mod', worldFolder = null } = {}) => {
+    const installation = requireInstallation(installationId)
+    const payload = await modrinthService.listInstalled(installation, contentType, worldFolder)
+    const indexType = CONTENT_INDEX_TYPES[contentType]
+    if (!indexType) return payload
+    try {
+      const indexRoot = contentType === 'datapack' && payload.directory ? path.dirname(payload.directory) : installation.gameDir
+      const index = await contentIndexService.list(indexRoot, indexType)
+      const byFilename = new Map(index.files.map((file) => [file.filename, file]))
+      return {
+        ...payload,
+        items: payload.items.map((item) => {
+          const file = byFilename.get(item.filename)
+          return {
+            ...item,
+            metadata: file?.metadata ?? null,
+            metadataReason: file?.reason ?? null,
+          }
+        }),
+      }
+    } catch (error) {
+      logger.warn?.('Could not read local content metadata', { message: error.message })
+      return {
+        ...payload,
+        items: payload.items.map((item) => ({
+          ...item,
+          metadata: null,
+          metadataReason: 'Local metadata could not be read.',
+        })),
+      }
+    }
   })
 
-  ipcMain.handle('mods:install', async (_event, { installationId, projectId, versionId = null, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:project', async (_event, { projectId } = {}) => {
+    return modrinthService.getProject(requireString(projectId, 'Project ID', 128))
+  })
+
+  ipcMain.handle('mods:versions', async (_event, { projectId, gameVersion = null, loader = null } = {}) => {
+    return modrinthService.getVersions(requireString(projectId, 'Project ID', 128), {
+      gameVersion: gameVersion ? requireString(gameVersion, 'Minecraft version', 40) : null,
+      loader: loader ? requireString(loader, 'Mod loader', 40) : null,
+    })
+  })
+
+  ipcMain.handle('mods:install', async (_event, { installationId, projectId, versionId = null, contentType = 'mod', worldFolder = null } = {}) => {
     const installation = requireInstallation(installationId)
     const result = await modrinthService.install(installation, {
       projectId: requireString(projectId, 'Modrinth project', 128),
       versionId: typeof versionId === 'string' && versionId ? versionId : null,
       contentType,
+      worldFolder,
     })
     await store.addActivity({
       type: 'install',
@@ -394,32 +649,119 @@ export function registerIpc({
     return result
   })
 
-  ipcMain.handle('mods:toggle', async (_event, { installationId, filename, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:inspectPack', async (_event, { path: packPath } = {}) => {
+    const target = requireString(packPath, 'Modpack path', 4096)
+    if (!path.isAbsolute(target)) throw new Error('Choose an absolute modpack path.')
+    return modpackImportService.inspect(target)
+  })
+
+  ipcMain.handle('mods:importPack', async (_event, { path: packPath, mode = 'copy' } = {}) => {
+    const target = requireString(packPath, 'Modpack path', 4096)
+    if (!path.isAbsolute(target)) throw new Error('Choose an absolute modpack path.')
+    if (mode !== 'copy' && mode !== 'adopt') throw new Error('Choose whether to copy or adopt the instance.')
+    const info = await modpackImportService.inspect(target)
+    if (info.kind === 'mrpack' && mode !== 'copy') throw new Error('.mrpack packs are always copied.')
+    const job = jobManager.enqueueModpackImport({
+      title: `Importing ${info.name}`,
+      subtitle: `Minecraft ${info.minecraftVersion}${info.loader.type !== 'vanilla' ? ` · ${info.loader.type}` : ''}`,
+      run: ({ signal, onProgress }) => modpackImportService.import(target, { mode, signal, onProgress }),
+    })
+    return { job, info }
+  })
+
+  ipcMain.handle('launcher-import:scan', async (_event, { path: extraPath = null } = {}) => {
+    let target = null
+    if (extraPath != null) {
+      target = requireString(extraPath, 'Folder path', 4096)
+      if (!path.isAbsolute(target)) throw new Error('Choose an absolute folder path.')
+    }
+    return launcherImportService.scan({ extraPath: target })
+  })
+
+  ipcMain.handle(
+    'launcher-import:start',
+    async (_event, { ids, mode = 'adopt', importWorlds = true, path: extraPath = null } = {}) => {
+      if (!Array.isArray(ids) || !ids.length) throw new Error('Choose at least one launcher profile.')
+      if (ids.length > 50) throw new Error('Import at most 50 profiles at a time.')
+      const uniqueIds = [...new Set(ids.map((id) => requireString(id, 'Profile ID', 128)))]
+      if (mode !== 'adopt' && mode !== 'copy') {
+        throw new Error('Choose whether to adopt or copy the profiles.')
+      }
+      let target = null
+      if (extraPath != null) {
+        target = requireString(extraPath, 'Folder path', 4096)
+        if (!path.isAbsolute(target)) throw new Error('Choose an absolute folder path.')
+      }
+      const selection = await launcherImportService.select(uniqueIds, { extraPath: target })
+      const job = jobManager.enqueueLauncherImport({
+        title: `Importing ${selection.candidates.length} launcher profile${
+          selection.candidates.length === 1 ? '' : 's'
+        }`,
+        subtitle: mode === 'adopt' ? 'Adopting folders in place' : 'Copying game content into Aqua',
+        run: ({ signal, onProgress }) =>
+          launcherImportService.importCandidates(selection.candidates, {
+            mode,
+            importWorlds: Boolean(importWorlds),
+            signal,
+            onProgress,
+          }),
+      })
+      return { job, candidates: selection.candidates }
+    },
+  )
+
+  ipcMain.handle('mods:exportPreview', async (_event, { installationId, includeWorlds = false } = {}) => {
+    return modpackExportService.preview(requireInstallation(installationId), {
+      includeWorlds: Boolean(includeWorlds),
+    })
+  })
+
+  ipcMain.handle('mods:exportPack', async (event, { installationId, includeWorlds = false } = {}) => {
+    const installation = requireInstallation(installationId)
+    const preview = await modpackExportService.preview(installation, { includeWorlds: Boolean(includeWorlds) })
+    const safeName = installation.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').trim() || 'Aqua modpack'
+    const result = await dialog.showSaveDialog(senderWindow(event), {
+      title: 'Export modpack',
+      defaultPath: `${safeName}.mrpack`,
+      filters: [{ name: 'Modrinth modpack', extensions: ['mrpack'] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    return modpackExportService.export(installation, {
+      includeWorlds: Boolean(includeWorlds),
+      destination: result.filePath,
+      preview,
+    })
+  })
+
+  ipcMain.handle('mods:toggle', async (_event, { installationId, filename, contentType = 'mod', worldFolder = null } = {}) => {
     return modrinthService.toggle(
       requireInstallation(installationId),
       requireString(filename, 'Content file', 260),
       contentType,
+      worldFolder,
     )
   })
 
-  ipcMain.handle('mods:remove', async (_event, { installationId, filename, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:remove', async (_event, { installationId, filename, contentType = 'mod', worldFolder = null } = {}) => {
     return modrinthService.remove(
       requireInstallation(installationId),
       requireString(filename, 'Content file', 260),
       contentType,
+      worldFolder,
     )
   })
 
-  ipcMain.handle('mods:checkUpdates', async (_event, { installationId, contentType = 'mod' } = {}) => {
-    return modrinthService.checkUpdates(requireInstallation(installationId), contentType)
+  ipcMain.handle('mods:checkUpdates', async (_event, { installationId, contentType = 'mod', worldFolder = null } = {}) => {
+    return modrinthService.checkUpdates(requireInstallation(installationId), contentType, worldFolder)
   })
 
-  ipcMain.handle('mods:update', async (_event, { installationId, filename, versionId, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:update', async (_event, { installationId, filename, versionId, contentType = 'mod', worldFolder = null } = {}) => {
     const installation = requireInstallation(installationId)
     const result = await modrinthService.update(installation, {
       filename: requireString(filename, 'Content file', 260),
       versionId: requireString(versionId, 'Modrinth version', 64),
       contentType,
+      worldFolder,
     })
     await store.addActivity({
       type: 'install',
@@ -467,10 +809,12 @@ export function registerIpc({
     return result
   })
 
-  ipcMain.handle('mods:openFolder', async (_event, { installationId, contentType = 'mod' } = {}) => {
+  ipcMain.handle('mods:openFolder', async (_event, { installationId, contentType = 'mod', worldFolder = null } = {}) => {
     const installation = requireInstallation(installationId)
     const directory =
-      contentType === 'modpack' ? path.join(installation.gameDir, 'mods') : modrinthService.contentDirectory(installation, contentType)
+      contentType === 'modpack'
+        ? path.join(installation.gameDir, 'mods')
+        : modrinthService.contentDirectoryForWorld(installation, contentType, worldFolder)
     await ensureDir(directory)
     const error = await shell.openPath(directory)
     if (error) throw new Error(error)
@@ -500,18 +844,133 @@ export function registerIpc({
 
   ipcMain.handle('storage:cancel', async () => storageService.cancel())
 
-  ipcMain.handle('game:launch', async (_event, { installationId, serverAddress } = {}) => {
+  ipcMain.handle('game:launch', async (_event, { installationId, serverAddress, safeMode } = {}) => {
     let quickPlay = null
     if (serverAddress != null && serverAddress !== '') {
       const target = normalizeServerAddress(requireString(serverAddress, 'Server address', 300))
       quickPlay = { type: 'multiplayer', address: target.connectAddress }
     }
-    return gameManager.launch(requireString(installationId, 'Installation ID', 128), { quickPlay })
+    return gameManager.launch(requireString(installationId, 'Installation ID', 128), {
+      quickPlay,
+      safeMode: safeMode === true,
+    })
+  })
+
+  ipcMain.handle('game:recoverSafeMode', async () => gameManager.recoverSafeMode())
+
+  ipcMain.handle('backups:status', async () => backupScheduler.status())
+
+  ipcMain.handle('backups:runNow', async (_event, { installationId } = {}) => {
+    return backupScheduler.runNow({
+      installationId: installationId ? requireString(installationId, 'Installation ID', 128) : null,
+      reason: 'manual',
+    })
+  })
+
+  ipcMain.handle('health:check', async (_event, { installationId } = {}) => {
+    return healthService.check(requireString(installationId, 'Installation ID', 128))
+  })
+
+  ipcMain.handle('health:summary', async () => healthService.summary())
+
+  ipcMain.handle('content:index', async (_event, { installationId, contentType, worldFolder = null } = {}) => {
+    const installation = requireInstallation(installationId)
+    const type = requireString(contentType, 'Content type', 32)
+    const root = type === 'datapacks' && worldFolder ? modrinthService.worldDirectory(installation, worldFolder) : installation.gameDir
+    return contentIndexService.list(root, type)
+  })
+
+  ipcMain.handle('content:file', async (_event, { installationId, contentType = 'mod', filename } = {}) => {
+    const installation = requireInstallation(installationId)
+    const type = requireString(contentType, 'Content type', 32)
+    const indexType = CONTENT_INDEX_TYPES[type]
+    if (!indexType) throw new Error('That content type cannot be inspected.')
+    return contentIndexService.file(installation.gameDir, indexType, requireString(filename, 'File name', 260))
+  })
+
+  ipcMain.handle('content:conflicts', async (_event, { installationId, contentType = 'mod' } = {}) => {
+    const installation = requireInstallation(installationId)
+    const type = requireString(contentType, 'Content type', 32)
+    const indexType = CONTENT_INDEX_TYPES[type]
+    if (!indexType) {
+      return {
+        missingDependencies: [],
+        duplicateIds: [],
+        loaderMismatch: [],
+        versionMismatch: [],
+        knownIncompatible: [],
+        total: 0,
+      }
+    }
+    const index = await contentIndexService.list(installation.gameDir, indexType)
+    return findConflicts({
+      ...index,
+      loader: installation.loader?.type || 'vanilla',
+      gameVersion: installation.versionId,
+    })
+  })
+
+  ipcMain.handle('content:importFiles', async (_event, {
+    installationId = null,
+    contentType = 'mod',
+    paths = [],
+    dryRun = false,
+    conflictPolicy = 'ask',
+    bedrockEditionId = null,
+  } = {}) => {
+    if (!Array.isArray(paths) || !paths.length) throw new Error('Drop at least one file to import.')
+    if (paths.length > 20) throw new Error('Import up to 20 files at a time.')
+    const installation = installationId ? requireInstallation(installationId) : null
+    const type = requireString(contentType, 'Content type', 32)
+    const policy = ['ask', 'replace', 'skip', 'keep-both'].includes(conflictPolicy) ? conflictPolicy : 'ask'
+    const editionId = bedrockEditionId ? requireString(bedrockEditionId, 'Bedrock edition', 64) : null
+    const game = gameManager.getState()
+    const result = await runImports({
+      paths,
+      gameDir: installation?.gameDir ?? null,
+      conflictPolicy: policy,
+      bedrockEditionId: editionId,
+      bedrockImport: (id, filePath) => bedrockAddonsService.import(id, filePath),
+      dryRun: dryRun === true,
+      gameRunning: game.status === 'running' || game.status === 'preparing',
+    })
+    if (!dryRun && result.imported.length) {
+      await store.addActivity({
+        type: 'install',
+        title: `Imported ${result.imported.length} file${result.imported.length === 1 ? '' : 's'}`,
+        detail: result.imported.map((item) => item.filename).join(', '),
+        installationId: installation?.id ?? null,
+        status: 'success',
+      })
+    }
+    return { ...result, requestedContentType: type }
+  })
+
+  ipcMain.handle('health:fix', async (_event, { installationId, kind } = {}) => {
+    const installation = requireInstallation(installationId)
+    const allowed = new Set(['reinstall', 'open-settings', 'open-folder', 'create-directory', 'open-content'])
+    if (!allowed.has(kind)) throw new Error('That health fix is not supported.')
+    healthService.invalidate(installation.id)
+    if (kind === 'reinstall') {
+      return { kind, job: jobManager.enqueueInstall(installation.id) }
+    }
+    if (kind === 'open-settings') return { kind, route: 'settings' }
+    if (kind === 'create-directory') {
+      await ensureDir(installation.gameDir)
+      return { kind, path: installation.gameDir }
+    }
+    const target = kind === 'open-content' ? path.join(installation.gameDir, 'mods') : installation.gameDir
+    await ensureDir(target)
+    const error = await shell.openPath(target)
+    if (error) throw new Error(error)
+    return { kind, path: target }
   })
 
   ipcMain.handle('worlds:list', async (_event, { installationId } = {}) => {
     return worldsService.list(requireString(installationId, 'Installation ID', 128))
   })
+
+  ipcMain.handle('worlds:searchIndex', async () => worldsService.searchIndex())
 
   ipcMain.handle('worlds:backup', async (_event, { installationId, folder, note = null } = {}) => {
     const installation = requireInstallation(installationId)
@@ -581,12 +1040,17 @@ export function registerIpc({
     return target
   })
 
+  ipcMain.handle('servers:lan', async () => lanDiscovery.status())
   ipcMain.handle('servers:list', async () => serverService.list())
   ipcMain.handle('servers:add', async (_event, input = {}) => {
     return serverService.add({
       name: typeof input.name === 'string' ? input.name : undefined,
       address: requireString(input.address, 'Server address', 300),
       edition: input.edition === 'bedrock' ? 'bedrock' : 'java',
+      installationId:
+        typeof input.installationId === 'string' && input.installationId
+          ? requireString(input.installationId, 'Installation ID', 128)
+          : null,
     })
   })
   ipcMain.handle('servers:update', async (_event, { id, patch } = {}) => {
@@ -598,10 +1062,11 @@ export function registerIpc({
   ipcMain.handle('servers:remove', async (_event, { id } = {}) => {
     return serverService.remove(requireString(id, 'Server ID', 64))
   })
-  ipcMain.handle('servers:ping', async (_event, { address, edition } = {}) => {
+  ipcMain.handle('servers:ping', async (_event, { address, edition, timeoutMs } = {}) => {
     return serverService.ping(
       requireString(address, 'Server address', 300),
       edition === 'bedrock' ? 'bedrock' : 'java',
+      Number.isFinite(timeoutMs) ? Number(timeoutMs) : undefined,
     )
   })
   ipcMain.handle('servers:markJoined', async (_event, { id } = {}) => {
@@ -764,6 +1229,17 @@ export function registerIpc({
 
   ipcMain.handle('game:getState', async () => gameManager.getState())
 
+  ipcMain.handle('crash:last', async () => store.crashes[0] || null)
+  ipcMain.handle('crash:list', async () => store.crashes)
+  ipcMain.handle('crash:analyze', async (_event, { installationId, file } = {}) => {
+    const report = await logService.read({
+      category: 'crash',
+      file: requireString(file, 'Crash report', 260),
+      installationId: requireString(installationId, 'Installation ID', 128),
+    })
+    return analyzeCrash({ text: report.content, exitCode: 1 })
+  })
+
   ipcMain.handle('logs:list', async () => logService.list())
   ipcMain.handle('logs:read', async (_event, request) => {
     return logService.read(requireObject(request, 'Log request'))
@@ -896,6 +1372,18 @@ export function registerIpc({
       properties: ['openFile'],
       buttonLabel: 'Import add-on',
       filters: [{ name: 'Bedrock add-ons', extensions: ['mcpack', 'mcaddon', 'mcworld', 'mctemplate', 'zip'] }],
+    })
+    if (result.canceled || !result.filePaths.length) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:choosePack', async (event) => {
+    const win = senderWindow(event)
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Choose a Modrinth modpack',
+      properties: ['openFile'],
+      buttonLabel: 'Inspect pack',
+      filters: [{ name: 'Modrinth modpack', extensions: ['mrpack'] }],
     })
     if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]

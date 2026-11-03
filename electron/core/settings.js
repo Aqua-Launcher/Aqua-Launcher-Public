@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import { assertAbsolutePath, assertSafeGameDirectory, clamp, parseArguments, parseJavaMajorVersion } from './util.js'
 import { recommendMaxRam } from './system.js'
+import { normalizeBackupPolicy } from './backup-scheduler.js'
+import { normalizeContentFilters } from './modrinth.js'
 
 export const THEMES = ['midnight', 'slate']
 export const ACCENTS = ['aqua', 'ocean', 'steel']
@@ -40,7 +42,10 @@ export function createDefaultSettings({ totalMemMb, instancesRoot }) {
     chunkyChromeLinked: true,
     uiScale: 1,
     reduceMotion: false,
+    highContrast: false,
+    reduceTransparency: false,
     ambient: true,
+    dashboardBackground: null,
     java: { mode: 'auto', path: null },
     memory: {
       minMb: Math.min(1024, Math.max(512, recommended - 1536)),
@@ -53,6 +58,14 @@ export function createDefaultSettings({ totalMemMb, instancesRoot }) {
     gameArgs: '',
     microsoftClientId: '',
     minecraftSettings: { sync: true },
+    backups: normalizeBackupPolicy({}),
+    contentFilters: {},
+    notifications: {
+      enabled: true,
+      native: true,
+      levels: { success: true, info: true, warning: true, error: true },
+    },
+    discord: { enabled: false, showServer: false },
     startup: {
       launchAtLogin: false,
       startMinimized: false,
@@ -121,6 +134,12 @@ export function normalizeSettings(raw, defaults) {
   const logging = source.logging && typeof source.logging === 'object' ? source.logging : {}
   const minecraftSettings =
     source.minecraftSettings && typeof source.minecraftSettings === 'object' ? source.minecraftSettings : {}
+  const backups = source.backups && typeof source.backups === 'object' ? source.backups : {}
+  const notifications =
+    source.notifications && typeof source.notifications === 'object' ? source.notifications : {}
+  const discord = source.discord && typeof source.discord === 'object' ? source.discord : {}
+  const notificationLevels =
+    notifications.levels && typeof notifications.levels === 'object' ? notifications.levels : {}
   return {
     onboardingComplete: asBoolean(source.onboardingComplete, base.onboardingComplete),
     theme: THEMES.includes(source.theme) ? source.theme : base.theme,
@@ -133,7 +152,13 @@ export function normalizeSettings(raw, defaults) {
     chunkyChromeLinked: asBoolean(source.chunkyChromeLinked, base.chunkyChromeLinked),
     uiScale: clampUiScale(source.uiScale),
     reduceMotion: asBoolean(source.reduceMotion, base.reduceMotion),
+    highContrast: asBoolean(source.highContrast, base.highContrast),
+    reduceTransparency: asBoolean(source.reduceTransparency, base.reduceTransparency),
     ambient: asBoolean(source.ambient, base.ambient),
+    dashboardBackground:
+      typeof source.dashboardBackground === 'string' && source.dashboardBackground.trim()
+        ? source.dashboardBackground.trim()
+        : null,
     java: {
       mode: java.mode === 'path' ? 'path' : 'auto',
       path: typeof java.path === 'string' && java.path.trim() ? java.path.trim() : null,
@@ -157,6 +182,22 @@ export function normalizeSettings(raw, defaults) {
     microsoftClientId: asString(source.microsoftClientId, base.microsoftClientId).trim(),
     minecraftSettings: {
       sync: asBoolean(minecraftSettings.sync, base.minecraftSettings?.sync ?? true),
+    },
+    backups: normalizeBackupPolicy(backups, base.backups),
+    contentFilters: normalizeContentFilters(source.contentFilters),
+    notifications: {
+      enabled: asBoolean(notifications.enabled, base.notifications?.enabled ?? true),
+      native: asBoolean(notifications.native, base.notifications?.native ?? true),
+      levels: {
+        success: asBoolean(notificationLevels.success, base.notifications?.levels?.success ?? true),
+        info: asBoolean(notificationLevels.info, base.notifications?.levels?.info ?? true),
+        warning: asBoolean(notificationLevels.warning, base.notifications?.levels?.warning ?? true),
+        error: asBoolean(notificationLevels.error, base.notifications?.levels?.error ?? true),
+      },
+    },
+    discord: {
+      enabled: asBoolean(discord.enabled, base.discord?.enabled ?? false),
+      showServer: asBoolean(discord.showServer, base.discord?.showServer ?? false),
     },
     startup: {
       launchAtLogin: asBoolean(startup.launchAtLogin, base.startup.launchAtLogin),
@@ -220,12 +261,33 @@ export async function validateSettings(settings, context) {
   if (!Number.isInteger(height) || height < 240 || height > 4320) errors.push('Window height must be between 240 and 4320.')
 
   if (!LOG_LEVELS.includes(settings.logging.level)) errors.push('Choose a valid log level.')
+  if (settings.dashboardBackground && !path.isAbsolute(settings.dashboardBackground)) {
+    errors.push('The dashboard background path is invalid.')
+  }
   if (
     !Number.isInteger(settings.logging.keepGameLogs) ||
     settings.logging.keepGameLogs < 1 ||
     settings.logging.keepGameLogs > 200
   ) {
     errors.push('Game log retention must be between 1 and 200 files.')
+  }
+
+  if (!Number.isInteger(settings.backups.dailyHour) || settings.backups.dailyHour < 0 || settings.backups.dailyHour > 23) {
+    errors.push('The daily backup hour must be between 0 and 23.')
+  }
+  if (
+    !Number.isInteger(settings.backups.retentionCount) ||
+    settings.backups.retentionCount < 1 ||
+    settings.backups.retentionCount > 50
+  ) {
+    errors.push('Backup retention must be between 1 and 50 copies.')
+  }
+  if (
+    !Number.isInteger(settings.backups.maxTotalMb) ||
+    settings.backups.maxTotalMb < 0 ||
+    settings.backups.maxTotalMb > 102_400
+  ) {
+    errors.push('The backup storage limit must be between 0 and 102,400 MB.')
   }
 
   const clientId = settings.microsoftClientId

@@ -1,7 +1,9 @@
-import { Minus, X } from 'lucide-react'
+import { Minus, Search, X } from 'lucide-react'
 import { api } from '../../lib/api'
+import { openCommandPalette } from '../command/CommandPalette'
 import { useLauncher } from '../../state/LauncherProvider'
 import { AppIcon } from '../brand/Brand'
+import { NotificationCenter } from './NotificationCenter'
 
 function RestoreIcon() {
   return (
@@ -30,6 +32,18 @@ export function Titlebar() {
       </div>
       <div className="titlebar__drag" onDoubleClick={toggleMaximize} aria-hidden="true" />
       <div className="titlebar__meta no-drag">
+        <button
+          type="button"
+          className="titlebar__search"
+          onClick={openCommandPalette}
+          aria-label="Search Aqua (Ctrl+K)"
+          title="Search Aqua (Ctrl+K)"
+        >
+          <Search size={12} strokeWidth={1.9} />
+          <span>Search</span>
+          <kbd>Ctrl K</kbd>
+        </button>
+        <NotificationCenter />
         <span className="titlebar__version">v{data?.app.version || '1.0.0'}</span>
       </div>
       <div className="titlebar__controls no-drag">

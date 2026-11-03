@@ -3,6 +3,27 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 let cachedPaths = null
+let portableInfo = {
+  active: false,
+  source: null,
+  warning: null,
+}
+
+/** Set by main.js before the first getPaths() call. */
+export function setPortableInfo(info = {}) {
+  portableInfo = { ...portableInfo, ...info }
+  cachedPaths = null
+}
+
+function resolveResourcesRoot() {
+  if (process.env.AQUA_RESOURCES) return process.env.AQUA_RESOURCES
+  const candidates = [
+    path.join(app.getAppPath(), 'build'),
+    path.join(path.dirname(process.execPath), 'build'),
+    process.resourcesPath ? path.join(process.resourcesPath, 'build') : null,
+  ].filter(Boolean)
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0]
+}
 
 export function getPaths() {
   if (cachedPaths) return cachedPaths
@@ -31,6 +52,8 @@ export function getPaths() {
     avatarCacheRoot: path.join(cacheRoot, 'avatars'),
     versionCacheRoot: path.join(cacheRoot, 'versions'),
     artworkCacheRoot: path.join(cacheRoot, 'artwork'),
+    screenshotsCacheRoot: path.join(cacheRoot, 'screenshots'),
+    backgroundsRoot: path.join(dataRoot, 'backgrounds'),
     backupsRoot,
     bedrockRoot,
     bedrockVersionsRoot: path.join(bedrockRoot, 'versions'),
@@ -47,7 +70,10 @@ export function getPaths() {
     bedrockVersionsCacheFile: path.join(cacheRoot, 'bedrock-versions.json'),
     runtimeRoot,
     launcherLog: path.join(logsRoot, 'launcher.log'),
-    resourcesRoot: process.env.AQUA_RESOURCES || path.join(app.getAppPath(), 'build'),
+    resourcesRoot: resolveResourcesRoot(),
+    portable: portableInfo.active,
+    portableSource: portableInfo.source,
+    portableWarning: portableInfo.warning,
   }
   return cachedPaths
 }
@@ -66,6 +92,8 @@ export async function ensureAppDirs(paths) {
     paths.avatarCacheRoot,
     paths.versionCacheRoot,
     paths.artworkCacheRoot,
+    paths.screenshotsCacheRoot,
+    paths.backgroundsRoot,
     paths.backupsRoot,
     paths.runtimeRoot,
     paths.bedrockRoot,
@@ -84,11 +112,14 @@ export async function ensureAppDirs(paths) {
 /** The packaged artwork lives next to the app when it ships. */
 function iconCandidates(names) {
   const paths = getPaths()
-  return [
+  const candidates = [
     ...names.map((name) => path.join(paths.resourcesRoot, name)),
     ...names.map((name) => path.join(app.getAppPath(), 'build', name)),
+    ...names.map((name) => path.join(path.dirname(process.execPath), 'build', name)),
+    ...(process.resourcesPath ? names.map((name) => path.join(process.resourcesPath, 'build', name)) : []),
     path.join(app.getAppPath(), 'public', 'favicon.png'),
   ]
+  return [...new Set(candidates)]
 }
 
 export function getTrayIconPath() {

@@ -1,10 +1,12 @@
 import { Fragment, useState } from 'react'
 import {
+  BarChart3,
   ChevronRight,
   Download,
   Gamepad2,
   Globe2,
   Home,
+  Image as ImageIcon,
   Layers,
   Map,
   Package,
@@ -25,7 +27,9 @@ import type { PageName } from '../../lib/types'
 const NAV_ITEMS: Array<{ page: PageName; label: string; icon: typeof Home }> = [
   { page: 'home', label: 'Home', icon: Home },
   { page: 'installations', label: 'Installations', icon: Layers },
+  { page: 'stats', label: 'Stats', icon: BarChart3 },
   { page: 'worlds', label: 'Worlds & backups', icon: Globe2 },
+  { page: 'screenshots', label: 'Screenshots', icon: ImageIcon },
   { page: 'servers', label: 'Servers', icon: Server },
   { page: 'mods', label: 'Extra content', icon: Package },
   { page: 'account', label: 'Account', icon: UserRound },
@@ -136,7 +140,11 @@ export function Sidebar() {
             </span>
             <span className="sidebar__status-copy">
               <span className="sidebar__status-title">
-                {game.status === 'running' ? 'Minecraft is running' : game.phase || 'Preparing launch'}
+                {game.status === 'running'
+                  ? game.safeMode?.active
+                    ? 'Minecraft is running · Safe Mode'
+                    : 'Minecraft is running'
+                  : game.phase || 'Preparing launch'}
               </span>
               <span className="sidebar__status-meta">
                 {game.status === 'running' ? elapsedSince(game.startedAt) : 'Please wait…'}

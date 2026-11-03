@@ -418,21 +418,144 @@ ol {
 [data-reduce-motion='true'] *,
 [data-reduce-motion='true'] *::before,
 [data-reduce-motion='true'] *::after {
-  animation-duration: 0.001ms !important;
+  animation: none !important;
   animation-iteration-count: 1 !important;
   scroll-behavior: auto !important;
-  transition-duration: 0.001ms !important;
+  transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
+    animation: none !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
-    transition-duration: 0.001ms !important;
+    transition: none !important;
   }
+}
+
+/* Accessibility ---------------------------------------------------------- */
+
+/* Keyboard users can jump past the titlebar and navigation on every page. */
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 9px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  transform: translateY(-160%);
+  transition: transform var(--transition);
+}
+
+.skip-link:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  transform: translateY(0);
+}
+
+/* Opaque, high-contrast surfaces. The palette deliberately keeps every
+   surface dark so the same tokens work across cards, dialogs and chrome. */
+html[data-transparency='reduced'] *,
+html[data-transparency='reduced'] *::before,
+html[data-transparency='reduced'] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-transparency='reduced'] .titlebar,
+html[data-transparency='reduced'] .sidebar,
+html[data-transparency='reduced'] .toast,
+html[data-transparency='reduced'] .modal,
+html[data-transparency='reduced'] .notification-pop {
+  background: var(--panel) !important;
+}
+
+html[data-transparency='reduced'] .modal-overlay {
+  background: #000 !important;
+}
+
+html[data-contrast='high'] {
+  --bg: #000000;
+  --bg-elevated: #080d12;
+  --bg-input: #000000;
+  --panel: #0b1117;
+  --panel-2: #121a22;
+  --panel-3: #1b2530;
+  --panel-hover: #18222b;
+  --surface-hero: linear-gradient(#000000, #000000);
+  --line: rgba(255, 255, 255, 0.42);
+  --line-strong: rgba(255, 255, 255, 0.62);
+  --line-bright: rgba(255, 255, 255, 0.82);
+  --line-accent: rgba(142, 203, 255, 0.75);
+  --text: #ffffff;
+  --text-secondary: #f0f5f9;
+  --body: #d7e1ea;
+  --muted: #c3d0db;
+  --dim: #b3c1cd;
+  --accent: #8ecbff;
+  --accent-strong: #6db8f5;
+  --accent-text: #c5e8ff;
+  --accent-soft: rgba(142, 203, 255, 0.2);
+  --accent-softer: rgba(142, 203, 255, 0.12);
+  --accent-ink: #000000;
+  --accent-glow: rgba(142, 203, 255, 0.4);
+  --danger: #ffb3bd;
+  --danger-soft: rgba(255, 179, 189, 0.14);
+  --warning: #f5c88f;
+  --warning-soft: rgba(245, 200, 143, 0.14);
+  --info: #c5e8ff;
+  --info-soft: rgba(197, 232, 255, 0.14);
+  --success: #9ff0c8;
+}
+
+html[data-contrast='high'] .titlebar,
+html[data-contrast='high'] .sidebar {
+  background: #000000 !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-contrast='high'] .hero,
+html[data-contrast='high'] .hero--art,
+html[data-contrast='high'] .page--home.has-background {
+  background: #000000 !important;
+  background-image: none !important;
+}
+
+html[data-contrast='high'] .hero__artwork,
+html[data-contrast='high'] .hero__scene,
+html[data-contrast='high'] .voxel-scene {
+  display: none !important;
+}
+
+html[data-contrast='high'] .modal-overlay {
+  background: #000000 !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-contrast='high'] .modal,
+html[data-contrast='high'] .toast,
+html[data-contrast='high'] .notification-pop,
+html[data-contrast='high'] .command-palette,
+html[data-contrast='high'] .hero--art .hero__installation-main,
+html[data-contrast='high'] .hero--art .hero__installation-menu,
+html[data-contrast='high'] .server-card {
+  background: var(--panel) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-contrast='high'] :focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 3px;
 }
 
 /* Square corners everywhere: the launcher keeps its retro, blocky look.

@@ -1,7 +1,7 @@
 import { randomId } from './util.js'
 
 function publicJob(job) {
-  const { abortController, ...rest } = job
+  const { abortController, runner, ...rest } = job
   return rest
 }
 
@@ -122,6 +122,111 @@ export class JobManager {
     return publicJob(job)
   }
 
+  /** Queues one cancellable background task whose runner owns the actual work. */
+  enqueueBackup({ installationId = null, title, subtitle, run }) {
+    const job = {
+      id: randomId(),
+      type: 'backup',
+      installationId,
+      installationName: null,
+      versionId: null,
+      title: title || 'Backing up worlds',
+      subtitle: subtitle || '',
+      status: 'queued',
+      stage: 'Queued',
+      progress: null,
+      indeterminate: true,
+      bytesDone: 0,
+      bytesTotal: 0,
+      filesDone: 0,
+      filesTotal: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      currentFile: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      abortController: null,
+      runner: run,
+    }
+    this.jobs.unshift(job)
+    this.jobs = this.jobs.slice(0, 30)
+    this.emitJobs()
+    this.drain()
+    return publicJob(job)
+  }
+
+  /** Local modpack import/copy; the runner owns validation and rollback. */
+  enqueueModpackImport({ title, subtitle, run }) {
+    const job = {
+      id: randomId(),
+      type: 'modpack-import',
+      installationId: null,
+      installationName: null,
+      versionId: null,
+      title: title || 'Importing modpack',
+      subtitle: subtitle || '',
+      status: 'queued',
+      stage: 'Queued',
+      progress: null,
+      indeterminate: true,
+      bytesDone: 0,
+      bytesTotal: 0,
+      filesDone: 0,
+      filesTotal: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      currentFile: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      abortController: null,
+      runner: run,
+    }
+    this.jobs.unshift(job)
+    this.jobs = this.jobs.slice(0, 30)
+    this.emitJobs()
+    this.drain()
+    return publicJob(job)
+  }
+
+  /** Batch import from another launcher; each profile is created and rolled back individually. */
+  enqueueLauncherImport({ title, subtitle, run }) {
+    const job = {
+      id: randomId(),
+      type: 'launcher-import',
+      installationId: null,
+      installationName: null,
+      versionId: null,
+      title: title || 'Importing launcher profiles',
+      subtitle: subtitle || '',
+      status: 'queued',
+      stage: 'Queued',
+      progress: null,
+      indeterminate: true,
+      bytesDone: 0,
+      bytesTotal: 0,
+      filesDone: 0,
+      filesTotal: 0,
+      speedBps: 0,
+      etaSeconds: null,
+      currentFile: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      abortController: null,
+      runner: run,
+    }
+    this.jobs.unshift(job)
+    this.jobs = this.jobs.slice(0, 30)
+    this.emitJobs()
+    this.drain()
+    return publicJob(job)
+  }
+
   cancel(jobId) {
     const job = this.jobs.find((item) => item.id === jobId)
     if (!job) throw new Error('Download not found.')
@@ -166,7 +271,47 @@ export class JobManager {
     this.emitJobs()
 
     try {
-      if (job.type === 'install') {
+      if (job.type === 'backup' || job.type === 'modpack-import' || job.type === 'launcher-import') {
+        const result = await job.runner({
+          signal: job.abortController.signal,
+          onProgress: (update) => this.updateJob(job, update),
+        })
+        if (job.cancelRequested) throw Object.assign(new Error('Backup cancelled.'), { name: 'AbortError' })
+        job.status = 'completed'
+        job.stage =
+          job.type === 'modpack-import' || job.type === 'launcher-import' ? 'Imported' : 'Backed up'
+        job.progress = 100
+        job.indeterminate = false
+        job.finishedAt = new Date().toISOString()
+        job.speedBps = 0
+        job.etaSeconds = 0
+        job.result = result || null
+        if (job.type === 'modpack-import' || job.type === 'launcher-import') {
+          await this.emitInstallations()
+          this.emitActivity()
+          if (job.type === 'launcher-import') {
+            const imported = Array.isArray(job.result?.imported) ? job.result.imported.length : 0
+            const failed = Array.isArray(job.result?.failed) ? job.result.failed.length : 0
+            this.emitNotification({
+              level: failed ? (imported ? 'warning' : 'error') : 'success',
+              title: failed ? 'Launcher import finished with errors' : 'Launcher profiles imported',
+              message: `${imported} profile${imported === 1 ? '' : 's'} imported${
+                failed ? `, ${failed} could not be imported` : ''
+              }.`,
+              dedupeKey: `job:${job.id}:completed`,
+              action: { page: 'installations', label: 'Open installations' },
+            })
+          } else {
+            this.emitNotification({
+              level: 'success',
+              title: 'Modpack imported',
+              message: job.title,
+              dedupeKey: `job:${job.id}:completed`,
+              action: { page: 'installations', label: 'Open installations' },
+            })
+          }
+        }
+      } else if (job.type === 'install') {
         const installation = this.store.getInstallation(job.installationId)
         if (!installation) throw new Error('The installation was removed before it could start.')
         const settings = this.store.settings
@@ -215,6 +360,8 @@ export class JobManager {
           level: 'success',
           title: 'Installation complete',
           message: `${installation.name} (${installation.versionId}) is installed and ready.`,
+          dedupeKey: `job:${job.id}:completed`,
+          action: { page: 'installations', label: 'Open installations' },
         })
         this.logger.info('Installation job completed', {
           installationId: installation.id,
@@ -260,6 +407,8 @@ export class JobManager {
           level: 'success',
           title: 'Java runtime installed',
           message: `Java ${result.major} (${result.version}) is ready to use.`,
+          dedupeKey: `job:${job.id}:completed`,
+          action: { page: 'settings', params: { section: 'settings-java' }, label: 'Open Java settings' },
         })
         this.logger.info('Java runtime job completed', { component: job.component, version: result.version })
       }
@@ -284,9 +433,23 @@ export class JobManager {
           type: job.type,
           message: job.error,
         })
+        const failure =
+          job.type === 'backup'
+            ? { type: 'world', title: 'World backup failed', notification: 'Backup failed' }
+            : job.type === 'modpack-import'
+              ? { type: 'install', title: 'Modpack import failed', notification: 'Modpack import failed' }
+              : job.type === 'launcher-import'
+                ? { type: 'install', title: 'Launcher import failed', notification: 'Launcher import failed' }
+            : job.type === 'install'
+              ? {
+                  type: 'install',
+                  title: `${job.installationName} installation failed`,
+                  notification: 'Installation failed',
+                }
+              : { type: 'java', title: 'Java runtime installation failed', notification: 'Java installation failed' }
         await this.store.addActivity({
-          type: job.type === 'install' ? 'install' : 'java',
-          title: job.type === 'install' ? `${job.installationName} installation failed` : 'Java runtime installation failed',
+          type: failure.type,
+          title: failure.title,
           detail: job.error,
           installationId: job.installationId,
           status: 'error',
@@ -294,8 +457,13 @@ export class JobManager {
         this.emitActivity()
         this.emitNotification({
           level: 'error',
-          title: job.type === 'install' ? 'Installation failed' : 'Java installation failed',
+          title: failure.notification,
           message: job.error,
+          dedupeKey: `job:${job.id}:failed`,
+          action:
+            job.type === 'backup'
+              ? { page: 'worlds', label: 'Open worlds' }
+              : { page: 'tasks', label: 'Open tasks' },
         })
         if (job.type === 'install') await this.emitInstallations()
       }

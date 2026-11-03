@@ -14,6 +14,15 @@ import {
   uniqueName,
 } from './util.js'
 import { getInstallationState } from './installer.js'
+import { normalizeBackupPolicy } from './backup-scheduler.js'
+import {
+  compareInstallationRecency,
+  INSTALLATION_COLORS,
+  normalizeColor,
+  normalizeCoverPath,
+  normalizeSortIndex,
+  normalizeTags,
+} from './installation-meta.js'
 import { LOADER_TYPES, loaderProfileId } from './loaders.js'
 
 /** The version folder that actually holds game files: the loader profile when modded. */
@@ -24,6 +33,7 @@ export function effectiveVersionId(installation) {
 }
 
 const VANILLA_LOADER = { type: 'vanilla', version: null, profileId: null }
+const META_PATCH_KEYS = new Set(['pinned', 'tags', 'color', 'coverPath', 'sortIndex'])
 
 function validateLoader(input) {
   if (input == null) return VANILLA_LOADER
@@ -148,7 +158,7 @@ export class InstallationService {
 
   async list() {
     const results = await Promise.all(this.store.installations.map((installation) => this.serialize(installation)))
-    return results.sort((a, b) => new Date(b.lastPlayedAt || b.createdAt) - new Date(a.lastPlayedAt || a.createdAt))
+    return results.sort(compareInstallationRecency)
   }
 
   async get(id) {
@@ -218,6 +228,11 @@ export class InstallationService {
       windowOverride: validateWindowOverride(input.window),
       jvmArgsOverride: validateArgs(input.jvmArgs, 'JVM arguments'),
       gameArgsOverride: validateArgs(input.gameArgs, 'Game arguments'),
+      pinned: false,
+      tags: [],
+      color: null,
+      coverPath: null,
+      sortIndex: null,
     }
     await this.store.addInstallation(installation)
     await this.store.setActiveInstallation(installation.id)
@@ -286,15 +301,44 @@ export class InstallationService {
     if (patch.window !== undefined) updates.windowOverride = validateWindowOverride(patch.window)
     if (patch.jvmArgs !== undefined) updates.jvmArgsOverride = validateArgs(patch.jvmArgs, 'JVM arguments')
     if (patch.gameArgs !== undefined) updates.gameArgsOverride = validateArgs(patch.gameArgs, 'Game arguments')
+    if (patch.backupPolicy !== undefined) {
+      updates.backupPolicy = patch.backupPolicy ? normalizeBackupPolicy(patch.backupPolicy) : null
+    }
+    if (patch.pinned !== undefined) updates.pinned = Boolean(patch.pinned)
+    if (patch.tags !== undefined) {
+      if (!Array.isArray(patch.tags)) throw new Error('Tags must be a list.')
+      updates.tags = normalizeTags(patch.tags)
+    }
+    if (patch.color !== undefined) {
+      if (patch.color !== null && !INSTALLATION_COLORS.includes(patch.color)) {
+        throw new Error('Choose a supported profile colour.')
+      }
+      updates.color = normalizeColor(patch.color)
+    }
+    if (patch.coverPath !== undefined) {
+      const coverPath = normalizeCoverPath(patch.coverPath)
+      if (patch.coverPath !== null && coverPath === null) throw new Error('That cover image path is not valid.')
+      updates.coverPath = coverPath
+    }
+    if (patch.sortIndex !== undefined) {
+      if (patch.sortIndex !== null && normalizeSortIndex(patch.sortIndex) === null) {
+        throw new Error('That sort position is not valid.')
+      }
+      updates.sortIndex = normalizeSortIndex(patch.sortIndex)
+    }
+    const onlyMetadata = Object.keys(patch).every((key) => META_PATCH_KEYS.has(key))
     await this.store.updateInstallation(id, updates)
     if (patch.setActive) await this.store.setActiveInstallation(id)
-    await this.store.addActivity({
-      type: 'installation',
-      title: `Updated ${updates.name || existing.name}`,
-      detail: `Minecraft ${updates.versionId || existing.versionId}`,
-      installationId: id,
-      status: 'info',
-    })
+    // Pinning or retagging a profile should not flood Recent activity.
+    if (!onlyMetadata) {
+      await this.store.addActivity({
+        type: 'installation',
+        title: `Updated ${updates.name || existing.name}`,
+        detail: `Minecraft ${updates.versionId || existing.versionId}`,
+        installationId: id,
+        status: 'info',
+      })
+    }
     return this.serialize(this.store.getInstallation(id))
   }
 
@@ -318,6 +362,11 @@ export class InstallationService {
       lastPlayedAt: null,
       totalPlaytimeMs: 0,
       lastInstalledAt: null,
+      pinned: false,
+      tags: [...(existing.tags || [])],
+      color: existing.color || null,
+      coverPath: null,
+      sortIndex: null,
     }
     await this.store.addInstallation(duplicate)
     await this.store.setActiveInstallation(duplicate.id)
@@ -347,6 +396,30 @@ export class InstallationService {
       gameDir: existing.gameDir,
     })
     return { removed: existing.name, gameDir: existing.gameDir }
+  }
+
+  /**
+   * Drag-to-reorder persists an explicit position for every Java profile.
+   * Requiring the full list keeps a filtered subset from overwriting positions.
+   */
+  async reorder(ids) {
+    if (!Array.isArray(ids)) throw new Error('Choose a new installation order.')
+    const installations = this.store.installations
+    if (ids.length !== installations.length) throw new Error('The order must include every installation.')
+    const seen = new Set()
+    for (const id of ids) {
+      if (typeof id !== 'string' || seen.has(id)) throw new Error('The installation order is invalid.')
+      seen.add(id)
+    }
+    if (installations.some((installation) => !seen.has(installation.id))) {
+      throw new Error('The installation order is invalid.')
+    }
+    ids.forEach((id, index) => {
+      this.store.getInstallation(id).sortIndex = index
+    })
+    await this.store.save()
+    this.logger.info('Installation order updated', { installations: ids.length })
+    return true
   }
 
   async setActive(id) {

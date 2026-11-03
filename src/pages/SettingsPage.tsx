@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
+  Archive,
   ArrowUpRight,
+  Bell,
   Check,
   Coffee,
   Cpu,
@@ -13,7 +15,9 @@ import {
   HardDrive,
   Info,
   Layers,
+  Link2,
   MemoryStick,
+  MessageCircle,
   Monitor,
   Palette,
   Power,
@@ -31,6 +35,7 @@ import { formatBytes, formatDateTime, relativeTime } from '../lib/format'
 import { javaPurpose } from '../lib/java-info'
 import { useLauncher } from '../state/LauncherProvider'
 import type {
+  BackupStatus,
   JavaRuntimeOption,
   MinecraftSettingsStatus,
   Settings,
@@ -38,6 +43,7 @@ import type {
 } from '../lib/types'
 import { PageHeader } from '../components/layout/PageHeader'
 import { StoragePanel } from '../components/settings/StoragePanel'
+import { LinksPanel } from '../components/settings/LinksPanel'
 import {
   Badge,
   Button,
@@ -54,11 +60,15 @@ const SECTIONS = [
   { id: 'settings-java', label: 'Java', icon: Coffee },
   { id: 'settings-memory', label: 'Memory', icon: MemoryStick },
   { id: 'settings-minecraft', label: 'Minecraft settings', icon: Gamepad2 },
+  { id: 'settings-backups', label: 'Backups', icon: Archive },
+  { id: 'settings-notifications', label: 'Notifications', icon: Bell },
+  { id: 'settings-discord', label: 'Discord presence', icon: MessageCircle },
   { id: 'settings-game', label: 'Game & downloads', icon: HardDrive },
   { id: 'settings-storage', label: 'Storage', icon: Database },
   { id: 'settings-window', label: 'Window', icon: Monitor },
   { id: 'settings-advanced', label: 'Advanced', icon: SlidersHorizontal },
   { id: 'settings-startup', label: 'Startup', icon: Power },
+  { id: 'settings-links', label: 'Links & CLI', icon: Link2 },
   { id: 'settings-troubleshooting', label: 'Troubleshooting', icon: Wrench },
   { id: 'settings-about', label: 'About', icon: Info },
 ] as const
@@ -106,6 +116,7 @@ function SettingsWorkspace({
     pushToast,
     navigate,
     selectedInstallation,
+    route,
   } = launcher
   const [form, setForm] = useState<Settings>(settings)
   const [activeSection, setActiveSection] = useState<SectionId>('settings-appearance')
@@ -118,6 +129,8 @@ function SettingsWorkspace({
   const [exporting, setExporting] = useState(false)
   const [diagnosticsPath, setDiagnosticsPath] = useState<string | null>(null)
   const [javaValidateResult, setJavaValidateResult] = useState<string | null>(null)
+  const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null)
+  const [backupBusy, setBackupBusy] = useState(false)
   const [checkingJava, setCheckingJava] = useState(false)
   const [minecraftStatus, setMinecraftStatus] = useState<MinecraftSettingsStatus | null>(null)
   const [minecraftBusy, setMinecraftBusy] = useState<'capture' | 'apply' | 'all' | null>(null)
@@ -136,7 +149,8 @@ function SettingsWorkspace({
   const dirty = JSON.stringify(form) !== JSON.stringify(settings)
   const totalMemory = system.totalMemMb
   const maxMemoryCeiling = Math.max(2048, Math.floor(totalMemory / 512) * 512)
-  const canLaunchAtLogin = data?.app.canLaunchAtLogin ?? false
+  const portable = data?.app.portable ?? false
+  const canLaunchAtLogin = (data?.app.canLaunchAtLogin ?? false) && !portable
 
   useEffect(() => {
     if (!dirty) setForm(settings)
@@ -162,6 +176,13 @@ function SettingsWorkspace({
 
   useEffect(() => {
     void loadRuntimeOptions()
+  }, [])
+
+  useEffect(() => {
+    void api.backups
+      .status()
+      .then(setBackupStatus)
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -299,10 +320,35 @@ function SettingsWorkspace({
     void api.windowControls.setZoom(settings.uiScale)
   }
 
+  const runBackups = async () => {
+    setBackupBusy(true)
+    try {
+      await api.backups.runNow()
+      pushToast({ level: 'success', title: 'Backups queued', message: 'Progress appears in Tasks.' })
+      setBackupStatus(await api.backups.status())
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Could not start backups', message: getErrorMessage(error) })
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
   const scrollTo = (id: SectionId) => {
     setActiveSection(id)
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
+
+  useEffect(() => {
+    const requested = route.params?.section
+    if (!requested) return
+    const section = SECTIONS.find((entry) => entry.id === requested)
+    if (!section) return
+    setActiveSection(section.id)
+    const timer = window.setTimeout(() => {
+      document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [route.params?.section])
 
   const browseGameDir = async () => {
     try {
@@ -416,6 +462,7 @@ function SettingsWorkspace({
                 type="button"
                 className={cx('settings-nav__item', activeSection === section.id && 'is-active')}
                 onClick={() => scrollTo(section.id)}
+                aria-current={activeSection === section.id ? 'location' : undefined}
               >
                 <Icon />
                 <span>{section.label}</span>
@@ -472,6 +519,26 @@ function SettingsWorkspace({
                   checked={form.reduceMotion}
                   onChange={(value) => update('reduceMotion', value)}
                   label="Reduce motion"
+                />
+              </FieldRow>
+              <FieldRow
+                title="High contrast"
+                description="Use stronger text, borders and surfaces for low-vision use."
+              >
+                <Switch
+                  checked={form.highContrast}
+                  onChange={(value) => update('highContrast', value)}
+                  label="High contrast"
+                />
+              </FieldRow>
+              <FieldRow
+                title="Reduce transparency"
+                description="Replace frosted overlays and translucent chrome with opaque surfaces."
+              >
+                <Switch
+                  checked={form.reduceTransparency}
+                  onChange={(value) => update('reduceTransparency', value)}
+                  label="Reduce transparency"
                 />
               </FieldRow>
               <FieldRow
@@ -802,6 +869,216 @@ function SettingsWorkspace({
             </div>
           </section>
 
+          <section className="settings-section" id="settings-backups">
+            <div className="settings-section__head">
+              <h2>World backups</h2>
+              <p>
+                Automatic ZIP copies of changed worlds. Restoring always adds a copy, so a live save is never replaced.
+              </p>
+            </div>
+            <div className="settings-card">
+              <FieldRow
+                title="Automatic backups"
+                description="Enables scheduled and after-play backups. Nothing is backed up automatically while this is off."
+              >
+                <Switch
+                  checked={form.backups.enabled}
+                  onChange={(value) => update('backups', { ...form.backups, enabled: value })}
+                  label="Automatic backups"
+                />
+              </FieldRow>
+              <FieldRow
+                title="After playing"
+                description="Back up worlds that changed during a session as soon as the game exits."
+              >
+                <Switch
+                  checked={form.backups.onExit}
+                  onChange={(value) => update('backups', { ...form.backups, onExit: value })}
+                  label="Back up after playing"
+                />
+              </FieldRow>
+              <FieldRow
+                title="Daily backup"
+                description="Runs once a day at this hour. A missed run happens once after the launcher reopens."
+              >
+                <div className="row gap-2">
+                  <Switch
+                    checked={form.backups.daily}
+                    onChange={(value) => update('backups', { ...form.backups, daily: value })}
+                    label="Daily backup"
+                  />
+                  <div className="select-wrap" style={{ width: 110 }}>
+                    <select
+                      className="select"
+                      value={form.backups.dailyHour}
+                      disabled={!form.backups.enabled || !form.backups.daily}
+                      onChange={(event) =>
+                        update('backups', { ...form.backups, dailyHour: Number(event.target.value) })
+                      }
+                      aria-label="Daily backup hour"
+                    >
+                      {Array.from({ length: 24 }, (_, hour) => (
+                        <option key={hour} value={hour}>
+                          {String(hour).padStart(2, '0')}:00
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </FieldRow>
+              <div className="settings-inline-grid">
+                <Field label="Copies to keep" hint="Per installation. Pinned backups are never removed.">
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={form.backups.retentionCount}
+                    onChange={(event) =>
+                      update('backups', { ...form.backups, retentionCount: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Storage limit (MB)" hint="0 means no size limit. The count limit still applies.">
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    max={102400}
+                    step={256}
+                    value={form.backups.maxTotalMb}
+                    onChange={(event) =>
+                      update('backups', { ...form.backups, maxTotalMb: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+              </div>
+              <FieldRow
+                title="Last run"
+                description={
+                  backupStatus?.lastRunAt
+                    ? `${relativeTime(backupStatus.lastRunAt)}${
+                        backupStatus.lastResult ? ` · ${backupStatus.lastResult.backedUp} backed up` : ''
+                      }${backupStatus.nextRunAt ? ` · next ${formatDateTime(backupStatus.nextRunAt)}` : ''}`
+                    : 'No backup run yet.'
+                }
+              >
+                <Button size="sm" icon={<Archive />} loading={backupBusy} onClick={() => void runBackups()}>
+                  Run now
+                </Button>
+              </FieldRow>
+              <p className="settings-hint">
+                Save changes before running. Backups run as a cancellable task, and retention is applied after every run.
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section" id="settings-notifications">
+            <div className="settings-section__head">
+              <h2>Notifications</h2>
+              <p>Keep launcher events in the titlebar bell and choose when Windows should interrupt you.</p>
+            </div>
+            <div className="settings-card">
+              <FieldRow
+                title="Notification center"
+                description="Save download, crash, update and backup events in the bell so they remain readable after a toast disappears."
+              >
+                <Switch
+                  checked={form.notifications.enabled}
+                  onChange={(value) =>
+                    update('notifications', { ...form.notifications, enabled: value })
+                  }
+                  label="Notification center"
+                />
+              </FieldRow>
+              <FieldRow
+                title="Native Windows notifications"
+                description="Show a Windows notification only when Aqua is hidden or another window has focus. The bell always records enabled levels."
+              >
+                <Switch
+                  checked={form.notifications.native}
+                  onChange={(value) => update('notifications', { ...form.notifications, native: value })}
+                  label="Native Windows notifications"
+                  disabled={!form.notifications.enabled}
+                />
+              </FieldRow>
+              {([
+                {
+                  key: 'success',
+                  title: 'Successful downloads and installs',
+                  description: 'Completed installations, modpack imports and Java runtime installs.',
+                },
+                {
+                  key: 'info',
+                  title: 'General updates',
+                  description: 'Game sessions and other informational events.',
+                },
+                {
+                  key: 'warning',
+                  title: 'Warnings',
+                  description: 'Safe Mode conflicts and recoverable problems.',
+                },
+                {
+                  key: 'error',
+                  title: 'Errors',
+                  description: 'Crashes and failed background tasks.',
+                },
+              ] as const).map((option) => (
+                <FieldRow key={option.key} title={option.title} description={option.description}>
+                  <Switch
+                    checked={form.notifications.levels[option.key]}
+                    onChange={(value) =>
+                      update('notifications', {
+                        ...form.notifications,
+                        levels: { ...form.notifications.levels, [option.key]: value },
+                      })
+                    }
+                    label={option.title}
+                    disabled={!form.notifications.enabled}
+                  />
+                </FieldRow>
+              ))}
+              <p className="settings-hint">
+                Clearing the bell only removes its entries. Crash reports and logs stay in Logs &amp; diagnostics.
+              </p>
+            </div>
+          </section>
+
+          <section className="settings-section" id="settings-discord">
+            <div className="settings-section__head">
+              <h2>Discord presence</h2>
+              <p>Show the active Java profile on your Discord profile while you play. Off by default.</p>
+            </div>
+            <div className="settings-card">
+              <FieldRow
+                title="Rich Presence"
+                description="Share the instance name, Minecraft version and loader with Discord while a Java game is running."
+              >
+                <Switch
+                  checked={form.discord.enabled}
+                  onChange={(value) => update('discord', { ...form.discord, enabled: value })}
+                  label="Discord Rich Presence"
+                />
+              </FieldRow>
+              <FieldRow
+                title="Show server address"
+                description="Include the server you joined and let friends request to join it. Leave this off to keep the address private."
+              >
+                <Switch
+                  checked={form.discord.showServer}
+                  onChange={(value) => update('discord', { ...form.discord, showServer: value })}
+                  label="Show server address"
+                  disabled={!form.discord.enabled}
+                />
+              </FieldRow>
+              <p className="settings-hint">
+                Aqua never sends account names, UUIDs, file paths or chat. Presence clears when the game exits, and
+                Discord does not need to be running when Aqua starts. A build needs its own registered Discord
+                application ID before Discord can display presence.
+              </p>
+            </div>
+          </section>
+
           <section className="settings-section" id="settings-game">
             <div className="settings-section__head">
               <h2>Game & downloads</h2>
@@ -1054,9 +1331,11 @@ function SettingsWorkspace({
               <FieldRow
                 title="Launch at login"
                 description={
-                  canLaunchAtLogin
-                    ? 'Start Aqua automatically when you sign in to Windows.'
-                    : 'Available in packaged builds. Development builds can still save this preference.'
+                  portable
+                    ? 'Disabled in portable mode so Aqua never writes a Windows startup entry outside its folder.'
+                    : canLaunchAtLogin
+                      ? 'Start Aqua automatically when you sign in to Windows.'
+                      : 'Available in packaged builds. Development builds can still save this preference.'
                 }
               >
                 <Switch
@@ -1216,6 +1495,16 @@ function SettingsWorkspace({
             </div>
           </section>
 
+          <section className="settings-section" id="settings-links">
+            <div className="settings-section__head">
+              <h2>Links & CLI</h2>
+              <p>Open Aqua from a browser, Discord, a shortcut or a script without hunting for the window.</p>
+            </div>
+            <div className="settings-card">
+              <LinksPanel />
+            </div>
+          </section>
+
           <section className="settings-section" id="settings-about">
             <div className="settings-section__head">
               <h2>About</h2>
@@ -1226,7 +1515,10 @@ function SettingsWorkspace({
                 <Cpu />
               </div>
               <div className="about-card__copy">
-                <strong>Aqua Launcher</strong>
+                <div className="about-card__title">
+                  <strong>Aqua Launcher</strong>
+                  {portable ? <Badge tone="info">Portable</Badge> : null}
+                </div>
                 <span>
                   Version {data?.app.version} · {system.platform} {system.arch}
                 </span>
@@ -1236,8 +1528,19 @@ function SettingsWorkspace({
                 <span>
                   {formatBytes(system.totalMemMb * 1024 * 1024)} RAM · {system.cpuModel}
                 </span>
+                <span className="about-card__data-root">
+                  Data folder <code>{system.dataRoot}</code>
+                </span>
               </div>
               <div className="about-card__links">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<FolderOpen />}
+                  onClick={() => void api.system.openFolder('data')}
+                >
+                  Data folder
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1248,6 +1551,12 @@ function SettingsWorkspace({
                 </Button>
               </div>
             </div>
+            {data?.app.portableWarning ? (
+              <div className="callout callout--warning" role="alert">
+                <TriangleAlert />
+                <div>{data.app.portableWarning}</div>
+              </div>
+            ) : null}
           </section>
 
           <div className="settings-savebar">

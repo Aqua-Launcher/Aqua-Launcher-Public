@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  Archive,
   Boxes,
   Check,
   CheckCircle2,
@@ -12,21 +13,33 @@ import {
   Gamepad2,
   Gem,
   Globe2,
+  GripVertical,
   HardDrive,
+  LayoutGrid,
+  List,
   Pencil,
+  Pin,
   Play,
   Plus,
   RefreshCw,
   Search,
+  Stethoscope,
   Store,
+  Tag,
   Trash2,
   X,
 } from 'lucide-react'
 import { api, getErrorMessage } from '../lib/api'
 import { formatBytes, formatEta, formatPlaytime, relativeTime, shortPath } from '../lib/format'
 import { loaderLabel } from '../lib/loaders'
+import {
+  installationColorHex,
+  sortInstallations,
+  type InstallationSortMode,
+  type InstallationViewMode,
+} from '../lib/installationMeta'
 import { useLauncher } from '../state/LauncherProvider'
-import type { DownloadJob, HorizonInstallJob, HorizonStatus, Installation } from '../lib/types'
+import type { DownloadJob, HealthStatus, HorizonInstallJob, HorizonStatus, Installation } from '../lib/types'
 import { PackIcon } from '../components/brand/Brand'
 import { PageHeader } from '../components/layout/PageHeader'
 import { ActionMenu } from '../components/ui/Menu'
@@ -34,8 +47,27 @@ import { Badge, Button, EmptyState, IconButton, cx } from '../components/ui/prim
 import { ConfirmDialog } from '../components/ui/overlays'
 import { InstallBedrockDialog } from '../components/bedrock/InstallBedrockDialog'
 import { RegisterBedrockDialog } from '../components/bedrock/RegisterBedrockDialog'
+import { HealthDialog } from '../components/dialogs/HealthDialog'
+import { ImportPackDialog } from '../components/installations/ImportPackDialog'
+import { LauncherImportDialog } from '../components/installations/LauncherImportDialog'
+import { ExportPackDialog } from '../components/installations/ExportPackDialog'
+import { InstallationMetaDialog } from '../components/installations/InstallationMetaDialog'
 
 type EditionFilter = 'all' | 'java' | 'bedrock' | 'horizon'
+
+const SORT_KEY = 'aqua.installations.sort.v1'
+const VIEW_KEY = 'aqua.installations.view.v1'
+const SORT_MODES: InstallationSortMode[] = ['recent', 'name', 'custom']
+const VIEW_MODES: InstallationViewMode[] = ['grid', 'compact']
+
+function readPreference<T extends string>(key: string, values: readonly T[], fallback: T): T {
+  try {
+    const stored = window.localStorage.getItem(key)
+    return values.includes(stored as T) ? (stored as T) : fallback
+  } catch {
+    return fallback
+  }
+}
 
 function activeInstallJob(jobs: DownloadJob[], installationId: string) {
   return (
@@ -67,6 +99,8 @@ export function InstallationsPage() {
     play,
     installGame,
     setActiveInstallation,
+    updateInstallationMeta,
+    reorderInstallations,
     openInstallationFolder,
     duplicateInstallation,
     deleteInstallation,
@@ -94,6 +128,16 @@ export function InstallationsPage() {
 
   const [filter, setFilter] = useState<EditionFilter>('all')
   const [query, setQuery] = useState('')
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [sortMode, setSortMode] = useState<InstallationSortMode>(() =>
+    readPreference(SORT_KEY, SORT_MODES, 'recent'),
+  )
+  const [viewMode, setViewMode] = useState<InstallationViewMode>(() =>
+    readPreference(VIEW_KEY, VIEW_MODES, 'grid'),
+  )
+  const [metaTarget, setMetaTarget] = useState<Installation | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [horizon, setHorizon] = useState<HorizonStatus | null>(null)
   const [horizonLoading, setHorizonLoading] = useState(false)
   const [horizonError, setHorizonError] = useState<string | null>(null)
@@ -105,7 +149,22 @@ export function InstallationsPage() {
   const [launchingEditionId, setLaunchingEditionId] = useState<string | null>(null)
   const [registerTarget, setRegisterTarget] = useState<string | null>(null)
   const [installTarget, setInstallTarget] = useState<string | null>(null)
+  const [healthTarget, setHealthTarget] = useState<Installation | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [launcherImportOpen, setLauncherImportOpen] = useState(false)
+  const [exportTarget, setExportTarget] = useState<Installation | null>(null)
+  const [healthSummaries, setHealthSummaries] = useState<Record<string, HealthStatus>>({})
   const javaIsPlayTarget = !bedrockTarget && !horizonTarget
+  const customOrder = sortMode === 'custom'
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SORT_KEY, sortMode)
+      window.localStorage.setItem(VIEW_KEY, viewMode)
+    } catch {
+      // Preferences are a convenience; a blocked localStorage is harmless.
+    }
+  }, [sortMode, viewMode])
 
   const targetEdition = (editionId: string) => {
     selectBedrockTarget(editionId)
@@ -178,6 +237,22 @@ export function InstallationsPage() {
     return unsubscribe
   }, [pushToast, refreshHorizon])
 
+  useEffect(() => {
+    let cancelled = false
+    api.health
+      .summary()
+      .then((summary) => {
+        if (cancelled) return
+        setHealthSummaries(
+          Object.fromEntries(summary.installations.map((entry) => [entry.installationId, entry.status])),
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [installations])
+
   const openEditionFolder = async (editionId: string) => {
     try {
       await api.bedrock.openFolder(editionId)
@@ -204,13 +279,34 @@ export function InstallationsPage() {
 
   const javaCards = useMemo(() => {
     if (filter !== 'all' && filter !== 'java') return []
-    return installations
-      .filter((installation) => matches(installation.name, installation.versionId, installation.gameDir, installation.loader?.type))
-      .sort((a, b) => {
-        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
-        return new Date(b.lastPlayedAt || b.createdAt).getTime() - new Date(a.lastPlayedAt || a.createdAt).getTime()
-      })
-  }, [installations, filter, normalizedQuery])
+    const selectedTag = tagFilter?.toLowerCase() ?? null
+    return sortInstallations(
+      installations.filter(
+        (installation) =>
+          matches(installation.name, installation.versionId, installation.gameDir, installation.loader?.type) &&
+          (!selectedTag || installation.tags.some((tag) => tag.toLowerCase() === selectedTag)),
+      ),
+      sortMode,
+    )
+  }, [installations, filter, normalizedQuery, tagFilter, sortMode])
+
+  const allTags = useMemo(() => {
+    const counts = new Map<string, { key: string; label: string; count: number }>()
+    for (const installation of installations) {
+      for (const tag of installation.tags) {
+        const key = tag.toLowerCase()
+        const entry = counts.get(key)
+        if (entry) entry.count += 1
+        else counts.set(key, { key, label: tag, count: 1 })
+      }
+    }
+    return [...counts.values()].sort((left, right) => left.label.localeCompare(right.label))
+  }, [installations])
+
+  // A tag that only existed on a deleted profile must not leave the list empty.
+  useEffect(() => {
+    if (tagFilter && !allTags.some((tag) => tag.key === tagFilter.toLowerCase())) setTagFilter(null)
+  }, [allTags, tagFilter])
 
   const editionCards = useMemo(() => {
     if (filter !== 'all' && filter !== 'bedrock') return []
@@ -283,6 +379,29 @@ export function InstallationsPage() {
     }
   }
 
+  const togglePinned = async (installation: Installation) => {
+    try {
+      await updateInstallationMeta(installation.id, { pinned: !installation.pinned })
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Could not update the profile', message: getErrorMessage(error) })
+    }
+  }
+
+  const moveInstallation = async (fromId: string, toId: string) => {
+    if (fromId === toId) return
+    const ids = sortInstallations(installations, 'custom').map((installation) => installation.id)
+    const from = ids.indexOf(fromId)
+    const to = ids.indexOf(toId)
+    if (from < 0 || to < 0) return
+    const [moved] = ids.splice(from, 1)
+    ids.splice(to, 0, moved)
+    try {
+      await reorderInstallations(ids)
+    } catch (error) {
+      pushToast({ level: 'error', title: 'Could not save the profile order', message: getErrorMessage(error) })
+    }
+  }
+
   const targetHorizonBuild = (build: NonNullable<HorizonStatus['builds']>[number]) => {
     selectHorizonTarget(build)
     pushToast({
@@ -336,6 +455,15 @@ export function InstallationsPage() {
               Refresh
             </Button>
             <Button
+              icon={<Archive />}
+              onClick={() => setImportOpen(true)}
+            >
+              Import pack
+            </Button>
+            <Button icon={<HardDrive />} onClick={() => setLauncherImportOpen(true)}>
+              Import launcher
+            </Button>
+            <Button
               variant="primary"
               icon={<Plus />}
               onClick={() => openInstallDialog({ mode: 'create', versionId: versions?.latest.release })}
@@ -386,6 +514,82 @@ export function InstallationsPage() {
         <span className="page-toolbar__count">
           {visibleCount} of {counts.all}
         </span>
+      </div>
+
+      <div className="installations-controls">
+        {allTags.length ? (
+          <div className="installations-controls__tags">
+            <span className="installations-controls__label">
+              <Tag /> Tags
+            </span>
+            <div className="filter-chips" role="group" aria-label="Filter by tag">
+              <button
+                type="button"
+                className={cx('chip', !tagFilter && 'is-active')}
+                onClick={() => setTagFilter(null)}
+                aria-pressed={!tagFilter}
+              >
+                All
+              </button>
+              {allTags.map((tag) => {
+                const active = tagFilter?.toLowerCase() === tag.key
+                return (
+                  <button
+                    key={tag.key}
+                    type="button"
+                    className={cx('chip', active && 'is-active')}
+                    onClick={() => setTagFilter(active ? null : tag.label)}
+                    aria-pressed={active}
+                  >
+                    {tag.label}
+                    <span className="chip__count">{tag.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <span className="installations-controls__hint">
+            Add tags from a profile’s menu to group and filter the list.
+          </span>
+        )}
+
+        <div className="installations-controls__actions">
+          {customOrder ? <span className="installations-controls__hint">Drag Java cards to reorder.</span> : null}
+          <label className="installations-sort">
+            <span>Java order</span>
+            <select
+              className="select"
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as InstallationSortMode)}
+              aria-label="Sort Java profiles"
+            >
+              <option value="recent">Recently played</option>
+              <option value="name">Name</option>
+              <option value="custom">Custom order</option>
+            </select>
+          </label>
+          <div className="view-toggle" role="group" aria-label="Profile view">
+            <IconButton
+              label="Grid view"
+              size="sm"
+              className={cx(viewMode === 'grid' && 'is-on')}
+              aria-pressed={viewMode === 'grid'}
+              onClick={() => setViewMode('grid')}
+            >
+              <LayoutGrid />
+            </IconButton>
+            <IconButton
+              label="Compact view"
+              size="sm"
+              className={cx(viewMode === 'compact' && 'is-on')}
+              aria-pressed={viewMode === 'compact'}
+              onClick={() => setViewMode('compact')}
+            >
+              <List />
+            </IconButton>
+          </div>
+        </div>
       </div>
 
       {bedrock?.supported && !bedrock?.editions.length && !bedrockLoading ? (
@@ -502,6 +706,7 @@ export function InstallationsPage() {
               onClick={() => {
                 setQuery('')
                 setFilter('all')
+                setTagFilter(null)
               }}
             >
               Clear filters
@@ -509,7 +714,7 @@ export function InstallationsPage() {
           </EmptyState>
         </div>
       ) : (
-        <div className="installation-grid">
+        <div className={cx('installation-grid', viewMode === 'compact' && 'is-compact')}>
           {javaCards.map((installation) => {
             const job = activeInstallJob(jobs, installation.id)
             const lastJob = latestInstallJob(jobs, installation.id)
@@ -520,7 +725,57 @@ export function InstallationsPage() {
             return (
               <article
                 key={installation.id}
-                className={cx('installation-card', installation.isActive && 'is-selected', isPlaying && 'is-playing')}
+                draggable={customOrder}
+                onDragStart={
+                  customOrder
+                    ? (event) => {
+                        setDraggingId(installation.id)
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('text/plain', installation.id)
+                      }
+                    : undefined
+                }
+                onDragOver={
+                  customOrder
+                    ? (event) => {
+                        event.preventDefault()
+                        event.dataTransfer.dropEffect = 'move'
+                        setDragOverId(installation.id)
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  customOrder
+                    ? () => setDragOverId((current) => (current === installation.id ? null : current))
+                    : undefined
+                }
+                onDrop={
+                  customOrder
+                    ? (event) => {
+                        event.preventDefault()
+                        const from = draggingId || event.dataTransfer.getData('text/plain')
+                        setDraggingId(null)
+                        setDragOverId(null)
+                        if (from) void moveInstallation(from, installation.id)
+                      }
+                    : undefined
+                }
+                onDragEnd={
+                  customOrder
+                    ? () => {
+                        setDraggingId(null)
+                        setDragOverId(null)
+                      }
+                    : undefined
+                }
+                className={cx(
+                  'installation-card',
+                  installation.isActive && 'is-selected',
+                  isPlaying && 'is-playing',
+                  customOrder && 'is-reorderable',
+                  draggingId === installation.id && 'is-dragging',
+                  dragOverId === installation.id && 'is-drag-over',
+                )}
               >
                 <div className="installation-card__top">
                   <div className="installation-card__identity">
@@ -543,6 +798,13 @@ export function InstallationsPage() {
                     </div>
                     <div className="installation-card__titles">
                       <div className="installation-card__name-row">
+                        {installation.color ? (
+                          <span
+                            className="installation-card__color"
+                            style={{ background: installationColorHex(installation.color) || undefined }}
+                            aria-hidden="true"
+                          />
+                        ) : null}
                         <h2 className="installation-card__name">{installation.name}</h2>
                         {installation.isActive && javaIsPlayTarget ? (
                           <span className="installation-card__target">
@@ -557,17 +819,64 @@ export function InstallationsPage() {
                             ? ` · ${loaderLabel(installation.loader.type)}`
                             : ''}
                         </span>
+                        {installation.pinned ? <Badge tone="info">Pinned</Badge> : null}
                         <Badge tone="default">Java</Badge>
+                        {healthSummaries[installation.id] ? (
+                          <Badge
+                            tone={
+                              healthSummaries[installation.id] === 'error'
+                                ? 'danger'
+                                : healthSummaries[installation.id] === 'warn'
+                                  ? 'warning'
+                                  : healthSummaries[installation.id] === 'ok'
+                                    ? 'success'
+                                    : 'default'
+                            }
+                          >
+                            {healthSummaries[installation.id] === 'ok'
+                              ? 'Healthy'
+                              : healthSummaries[installation.id] === 'error'
+                                ? 'Health issue'
+                                : healthSummaries[installation.id] === 'warn'
+                                  ? 'Check health'
+                                  : 'Health unknown'}
+                          </Badge>
+                        ) : null}
                       </div>
                     </div>
                   </div>
-                  <ActionMenu
-                    label={`Actions for ${installation.name}`}
+                  <div className="installation-card__top-actions">
+                    {customOrder ? (
+                      <span className="installation-card__grip" title="Drag to reorder" aria-hidden="true">
+                        <GripVertical />
+                      </span>
+                    ) : null}
+                    <IconButton
+                      label={installation.pinned ? `Unpin ${installation.name}` : `Pin ${installation.name} to the top`}
+                      size="sm"
+                      className={cx('installation-card__pin', installation.pinned && 'is-on')}
+                      aria-pressed={installation.pinned}
+                      onClick={() => void togglePinned(installation)}
+                    >
+                      <Pin />
+                    </IconButton>
+                    <ActionMenu
+                      label={`Actions for ${installation.name}`}
                     items={[
                       {
                         label: 'Edit installation',
                         icon: <Pencil />,
                         onSelect: () => openInstallDialog({ mode: 'edit', installation }),
+                      },
+                      {
+                        label: installation.pinned ? 'Unpin from the top' : 'Pin to the top',
+                        icon: <Pin />,
+                        onSelect: () => void togglePinned(installation),
+                      },
+                      {
+                        label: 'Edit tags & colour',
+                        icon: <Tag />,
+                        onSelect: () => setMetaTarget(installation),
                       },
                       {
                         label: installation.installed ? 'Verify game files' : 'Download game files',
@@ -578,6 +887,11 @@ export function InstallationsPage() {
                         label: 'Open game folder',
                         icon: <FolderOpen />,
                         onSelect: () => void openInstallationFolder(installation.id),
+                      },
+                      {
+                        label: 'Export pack',
+                        icon: <Archive />,
+                        onSelect: () => setExportTarget(installation),
                       },
                       {
                         label: 'Set as default Java installation',
@@ -598,7 +912,8 @@ export function InstallationsPage() {
                         onSelect: () => requestDelete(installation),
                       },
                     ]}
-                  />
+                    />
+                  </div>
                 </div>
 
                 <div className="installation-card__statusline">
@@ -606,6 +921,25 @@ export function InstallationsPage() {
                     {installation.lastPlayedAt ? `Played ${relativeTime(installation.lastPlayedAt)}` : 'Never played'}
                   </span>
                 </div>
+
+                {installation.tags.length ? (
+                  <div className="installation-card__tags" aria-label={`${installation.name} tags`}>
+                    {installation.tags.map((tag) => {
+                      const active = tagFilter?.toLowerCase() === tag.toLowerCase()
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          className={cx('tag-chip', active && 'is-active')}
+                          aria-pressed={active}
+                          onClick={() => setTagFilter(active ? null : tag)}
+                        >
+                          {tag}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
 
                 <div className="installation-card__meta">
                   <div>
@@ -697,6 +1031,14 @@ export function InstallationsPage() {
                       Install
                     </Button>
                   )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<Stethoscope />}
+                    onClick={() => setHealthTarget(installation)}
+                  >
+                    Health
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1007,6 +1349,8 @@ export function InstallationsPage() {
         </div>
       )}
 
+      <InstallationMetaDialog installation={metaTarget} onClose={() => setMetaTarget(null)} />
+
       <RegisterBedrockDialog
         version={registerTarget}
         onCancel={() => setRegisterTarget(null)}
@@ -1016,6 +1360,8 @@ export function InstallationsPage() {
           if (version) void registerBedrockVersion(version, options)
         }}
       />
+
+      {healthTarget ? <HealthDialog installation={healthTarget} onClose={() => setHealthTarget(null)} /> : null}
 
       <InstallBedrockDialog
         version={installTarget}
@@ -1059,6 +1405,10 @@ export function InstallationsPage() {
           </div>
         ) : null}
       </ConfirmDialog>
+
+      <ImportPackDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <LauncherImportDialog open={launcherImportOpen} onClose={() => setLauncherImportOpen(false)} />
+      <ExportPackDialog installation={exportTarget} onClose={() => setExportTarget(null)} />
     </div>
   )
 }

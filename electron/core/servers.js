@@ -303,6 +303,7 @@ export async function pingServer(address, { timeoutMs = 5000, edition = 'java' }
         motd: status.motd || 'A Minecraft server',
         version: status.version,
         protocol: status.protocol,
+        modded: false,
         players: { online: status.players.online, max: status.players.max, sample: [] },
         favicon: null,
         error: null,
@@ -323,6 +324,14 @@ export async function pingServer(address, { timeoutMs = 5000, edition = 'java' }
       motd: motdToText(status.description) || 'A Minecraft server',
       version: typeof version.name === 'string' ? version.name : null,
       protocol: Number.isFinite(Number(version.protocol)) ? Number(version.protocol) : null,
+      // Forge and NeoForge add their own status payload; a vanilla-compatible
+      // server does not, even when it is running plugins.
+      modded: Boolean(
+        status?.forgeData ||
+          status?.modinfo ||
+          status?.neoforgeData ||
+          Number(status?.fmlNetworkVersion) > 0,
+      ),
       players: {
         online: Math.max(0, Number(players.online) || 0),
         max: Math.max(0, Number(players.max) || 0),
@@ -348,6 +357,7 @@ export async function pingServer(address, { timeoutMs = 5000, edition = 'java' }
       motd: null,
       version: null,
       protocol: null,
+      modded: false,
       players: { online: 0, max: 0, sample: [] },
       favicon: null,
       error: friendlyNetworkError(error),
@@ -378,21 +388,38 @@ export class ServerService {
     })
   }
 
-  async add({ name, address, edition = 'java' } = {}) {
+  bindingFor(installationId, edition) {
+    if (edition === 'bedrock' || installationId == null || installationId === '') return null
+    if (typeof installationId !== 'string' || !installationId.trim()) {
+      throw new Error('That installation is invalid.')
+    }
+    const installation = this.store.getInstallation(installationId.trim())
+    if (!installation) throw new Error('That installation no longer exists.')
+    return installation.id
+  }
+
+  async add({ name, address, edition = 'java', installationId = null } = {}) {
     const target = normalizeServerAddress(address, { edition })
     if (this.findDuplicate(target.address, null, target.edition)) throw new Error('That server is already in your list.')
     const displayName = name == null || !String(name).trim() ? target.address : cleanDisplayName(name, 60)
+    const boundInstallationId = this.bindingFor(installationId, target.edition)
     const server = {
       id: randomId(),
       name: displayName,
       address: target.address,
       connectAddress: target.connectAddress,
       edition: target.edition,
+      installationId: boundInstallationId,
       addedAt: new Date().toISOString(),
       lastJoinedAt: null,
     }
     await this.store.addServer(server)
-    this.logger?.info('Added Minecraft server', { name: displayName, address: target.address, edition: target.edition })
+    this.logger?.info('Added Minecraft server', {
+      name: displayName,
+      address: target.address,
+      edition: target.edition,
+      installationId: boundInstallationId,
+    })
     return this.store.publicServer(server)
   }
 
@@ -409,6 +436,9 @@ export class ServerService {
       updates.address = target.address
       updates.connectAddress = target.connectAddress
     }
+    if (patch.installationId !== undefined) {
+      updates.installationId = this.bindingFor(patch.installationId, edition)
+    }
     await this.store.updateServer(id, updates)
     return this.store.publicServer(this.store.getServer(id))
   }
@@ -419,8 +449,8 @@ export class ServerService {
     return { id: removed.id, name: removed.name }
   }
 
-  ping(address, edition = 'java') {
-    return pingServer(address, { edition })
+  ping(address, edition = 'java', timeoutMs = undefined) {
+    return pingServer(address, { edition, timeoutMs })
   }
 
   async markJoined(id) {

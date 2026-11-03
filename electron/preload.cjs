@@ -1,11 +1,25 @@
-const { clipboard, contextBridge, ipcRenderer } = require('electron')
+const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron')
 
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 
 const api = {
   bootstrap: () => invoke('app:bootstrap'),
   openExternal: (url) => invoke('app:openExternal', { url }),
+  files: {
+    getPath: (file) => {
+      try {
+        return webUtils.getPathForFile(file) || ''
+      } catch {
+        return ''
+      }
+    },
+  },
   reportRendererError: (payload) => invoke('app:rendererError', payload),
+  rendererReady: () => invoke('app:rendererReady'),
+  links: {
+    status: () => invoke('app:linkStatus'),
+    register: () => invoke('app:registerLinks'),
+  },
   copyText: (text) => {
     if (typeof text !== 'string') return false
     clipboard.writeText(text.slice(0, 100_000))
@@ -24,14 +38,26 @@ const api = {
   artwork: {
     versionArt: (versionId) => invoke('artwork:versionArt', { versionId }),
   },
+  docs: {
+    image: (url) => invoke('docs:image', { url }),
+  },
+  stats: {
+    summary: () => invoke('stats:summary'),
+    exportCsv: () => invoke('stats:exportCsv'),
+  },
   blockTextures: {
     list: (options = {}) => invoke('block-textures:list', options),
+  },
+  launcherImport: {
+    scan: (path = null) => invoke('launcher-import:scan', { path }),
+    start: (ids, options = {}) => invoke('launcher-import:start', { ids, ...options }),
   },
   installations: {
     list: () => invoke('installations:list'),
     get: (id) => invoke('installations:get', { id }),
     create: (input) => invoke('installations:create', input),
     update: (id, patch) => invoke('installations:update', { id, patch }),
+    reorder: (ids) => invoke('installations:reorder', { ids }),
     duplicate: (id) => invoke('installations:duplicate', { id }),
     remove: (id) => invoke('installations:remove', { id }),
     setActive: (id) => invoke('installations:setActive', { id }),
@@ -40,6 +66,35 @@ const api = {
   },
   settings: {
     update: (patch) => invoke('settings:update', patch),
+  },
+  screenshots: {
+    list: (installationId) => invoke('screenshots:list', { installationId }),
+    thumbnail: (installationId, filename, size = 480) =>
+      invoke('screenshots:thumbnail', { installationId, filename, size }),
+    open: (installationId, filename) => invoke('screenshots:open', { installationId, filename }),
+    copy: (installationId, filename) => invoke('screenshots:copy', { installationId, filename }),
+    reveal: (installationId, filename) => invoke('screenshots:reveal', { installationId, filename }),
+    openFolder: (installationId) => invoke('screenshots:openFolder', { installationId }),
+    delete: (installationId, filename) => invoke('screenshots:delete', { installationId, filename }),
+    setBackground: (installationId, filename) =>
+      invoke('screenshots:setBackground', { installationId, filename }),
+    clearBackground: () => invoke('screenshots:clearBackground'),
+    background: () => invoke('screenshots:background'),
+  },
+  backups: {
+    status: () => invoke('backups:status'),
+    runNow: (installationId = null) => invoke('backups:runNow', { installationId }),
+  },
+  health: {
+    check: (installationId) => invoke('health:check', { installationId }),
+    summary: () => invoke('health:summary'),
+    fix: (installationId, kind) => invoke('health:fix', { installationId, kind }),
+  },
+  content: {
+    index: (installationId, contentType) => invoke('content:index', { installationId, contentType }),
+    file: (installationId, contentType, filename) => invoke('content:file', { installationId, contentType, filename }),
+    conflicts: (installationId, contentType) => invoke('content:conflicts', { installationId, contentType }),
+    importFiles: (request) => invoke('content:importFiles', request),
   },
   accounts: {
     list: () => invoke('accounts:list'),
@@ -63,21 +118,32 @@ const api = {
   },
   mods: {
     search: (installationId, options = {}) => invoke('mods:search', { installationId, ...options }),
-    list: (installationId, contentType = 'mod') => invoke('mods:list', { installationId, contentType }),
-    install: (installationId, projectId, versionId = null, contentType = 'mod') =>
-      invoke('mods:install', { installationId, projectId, versionId, contentType }),
+    list: (installationId, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:list', { installationId, contentType, worldFolder }),
+    install: (installationId, projectId, versionId = null, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:install', { installationId, projectId, versionId, contentType, worldFolder }),
     installModpack: (projectId, versionId = null) => invoke('mods:installModpack', { projectId, versionId }),
-    checkUpdates: (installationId, contentType = 'mod') => invoke('mods:checkUpdates', { installationId, contentType }),
-    update: (installationId, filename, versionId, contentType = 'mod') =>
-      invoke('mods:update', { installationId, filename, versionId, contentType }),
-    toggle: (installationId, filename, contentType = 'mod') =>
-      invoke('mods:toggle', { installationId, filename, contentType }),
-    remove: (installationId, filename, contentType = 'mod') =>
-      invoke('mods:remove', { installationId, filename, contentType }),
+    inspectPack: (path) => invoke('mods:inspectPack', { path }),
+    importPack: (path, mode = 'copy') => invoke('mods:importPack', { path, mode }),
+    exportPreview: (installationId, includeWorlds = false) =>
+      invoke('mods:exportPreview', { installationId, includeWorlds }),
+    exportPack: (installationId, includeWorlds = false) =>
+      invoke('mods:exportPack', { installationId, includeWorlds }),
+    checkUpdates: (installationId, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:checkUpdates', { installationId, contentType, worldFolder }),
+    update: (installationId, filename, versionId, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:update', { installationId, filename, versionId, contentType, worldFolder }),
+    toggle: (installationId, filename, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:toggle', { installationId, filename, contentType, worldFolder }),
+    remove: (installationId, filename, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:remove', { installationId, filename, contentType, worldFolder }),
     retargetInfo: (installationId, filename) => invoke('mods:retargetInfo', { installationId, filename }),
     retarget: (installationId, filename) => invoke('mods:retarget', { installationId, filename }),
     retargetUndo: (installationId, filename) => invoke('mods:retargetUndo', { installationId, filename }),
-    openFolder: (installationId, contentType = 'mod') => invoke('mods:openFolder', { installationId, contentType }),
+    openFolder: (installationId, contentType = 'mod', worldFolder = null) =>
+      invoke('mods:openFolder', { installationId, contentType, worldFolder }),
+    project: (projectId) => invoke('mods:project', { projectId }),
+    versions: (projectId, options = {}) => invoke('mods:versions', { projectId, ...options }),
   },
   minecraftSettings: {
     status: () => invoke('minecraftSettings:status'),
@@ -96,23 +162,37 @@ const api = {
     cancel: () => invoke('storage:cancel'),
   },
   game: {
-    launch: (installationId, serverAddress = null) => invoke('game:launch', { installationId, serverAddress }),
+    launch: (installationId, serverAddress = null, safeMode = false) =>
+      invoke('game:launch', { installationId, serverAddress, safeMode }),
     getState: () => invoke('game:getState'),
+    recoverSafeMode: () => invoke('game:recoverSafeMode'),
+  },
+  crash: {
+    last: () => invoke('crash:last'),
+    list: () => invoke('crash:list'),
+    analyze: (installationId, file) => invoke('crash:analyze', { installationId, file }),
   },
   worlds: {
     list: (installationId) => invoke('worlds:list', { installationId }),
+    searchIndex: () => invoke('worlds:searchIndex'),
     backup: (installationId, folder, note = null) => invoke('worlds:backup', { installationId, folder, note }),
     restore: (installationId, backupId) => invoke('worlds:restore', { installationId, backupId }),
     deleteBackup: (installationId, backupId) => invoke('worlds:deleteBackup', { installationId, backupId }),
     delete: (installationId, folder) => invoke('worlds:delete', { installationId, folder }),
     openFolder: (installationId, folder = null) => invoke('worlds:openFolder', { installationId, folder }),
   },
+  notifications: {
+    list: () => invoke('notifications:list'),
+    markRead: (ids = null) => invoke('notifications:markRead', { ids }),
+    clear: () => invoke('notifications:clear'),
+  },
   servers: {
+    lan: () => invoke('servers:lan'),
     list: () => invoke('servers:list'),
     add: (input) => invoke('servers:add', input),
     update: (id, patch) => invoke('servers:update', { id, patch }),
     remove: (id) => invoke('servers:remove', { id }),
-    ping: (address, edition = 'java') => invoke('servers:ping', { address, edition }),
+    ping: (address, edition = 'java', timeoutMs) => invoke('servers:ping', { address, edition, timeoutMs }),
     markJoined: (id) => invoke('servers:markJoined', { id }),
   },
   horizon: {
@@ -170,6 +250,7 @@ const api = {
     chooseDirectory: (options = {}) => invoke('dialog:chooseDirectory', options),
     chooseJava: () => invoke('dialog:chooseJava'),
     chooseAddon: () => invoke('dialog:chooseAddon'),
+    choosePack: () => invoke('dialog:choosePack'),
     chooseHorizonMod: () => invoke('dialog:chooseHorizonMod'),
   },
   events: {

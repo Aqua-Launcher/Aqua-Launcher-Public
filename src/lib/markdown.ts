@@ -3,9 +3,12 @@
  *
  * The project does not carry a Markdown dependency, and the README/ROADMAP use a
  * narrow slice of the syntax: headings, paragraphs, lists, fenced code, tables,
- * quotes, rules, links, bold, inline code and badge images. This parses exactly
- * that slice into blocks; the React component turns blocks into elements.
+ * quotes, rules, links, bold, inline code, and images (Markdown `![]()` plus the
+ * centred HTML `<img>` banner the README opens with). This parses exactly that
+ * slice into blocks; the React component turns blocks into elements.
  */
+
+export type MarkdownImageAlign = 'left' | 'center' | 'right' | null
 
 export type MarkdownBlock =
   | { kind: 'heading'; level: number; text: string }
@@ -14,6 +17,7 @@ export type MarkdownBlock =
   | { kind: 'code'; text: string }
   | { kind: 'table'; head: string[]; rows: string[][] }
   | { kind: 'quote'; text: string }
+  | { kind: 'image'; src: string; alt: string; width: string | null; align: MarkdownImageAlign }
   | { kind: 'rule' }
 
 const HEADING = /^(#{1,6})\s+(.*)$/
@@ -24,10 +28,49 @@ const OL_ITEM = /^\d+\.\s+(.*)$/
 const QUOTE = /^>\s?(.*)$/
 const TABLE_ROW = /^\|(.+)\|$/
 const TABLE_SEPARATOR = /^\|[\s:|-]+\|$/
+const HTML_BLOCK = /^<(?:p|img|figure|picture|div)\b/i
+const IMG_TAG = /<img\b([^>]*)>/i
 
 function splitRow(line: string): string[] {
   const inner = line.trim().replace(/^\|/, '').replace(/\|$/, '')
   return inner.split('|').map((cell) => cell.trim())
+}
+
+/** Reads one attribute from an HTML tag without pulling in a parser. */
+function htmlAttribute(attributes: string, name: string): string | null {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attributes)
+  if (!match) return null
+  const value = (match[1] ?? match[2] ?? match[3] ?? '').trim()
+  return value || null
+}
+
+/**
+ * A paragraph of raw HTML becomes an image block when it contains an `<img>`.
+ * The README opens with one of these so the banner can be centred and given an
+ * explicit width; everything else in the HTML chunk is presentation only.
+ */
+function readHtmlImage(lines: string[], start: number): { block: MarkdownBlock; next: number } | null {
+  let end = start
+  while (end < lines.length && lines[end].trim()) end += 1
+  const html = lines.slice(start, end).join(' ')
+  const image = IMG_TAG.exec(html)
+  if (!image) return null
+  const src = htmlAttribute(image[1], 'src')
+  if (!src) return null
+  const align = /\balign\s*=\s*(?:"(left|center|right)"|'(left|center|right)'|(left|center|right))/i.exec(html)
+  const alignText = (align?.[1] || align?.[2] || align?.[3] || '').toLowerCase()
+  const placement: MarkdownImageAlign =
+    alignText === 'left' || alignText === 'center' || alignText === 'right' ? alignText : null
+  return {
+    block: {
+      kind: 'image',
+      src,
+      alt: htmlAttribute(image[1], 'alt') || '',
+      width: htmlAttribute(image[1], 'width'),
+      align: placement,
+    },
+    next: end,
+  }
 }
 
 export function parseMarkdown(source: string): MarkdownBlock[] {
@@ -67,6 +110,17 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       blocks.push({ kind: 'rule' })
       index += 1
       continue
+    }
+
+    // Raw HTML is only interesting when it carries an image; otherwise it falls
+    // through and renders as ordinary paragraph text.
+    if (HTML_BLOCK.test(line.trim())) {
+      const image = readHtmlImage(lines, index)
+      if (image) {
+        blocks.push(image.block)
+        index = image.next
+        continue
+      }
     }
 
     // A table starts with a row and is confirmed by the separator underneath.
@@ -133,7 +187,8 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
         OL_ITEM.test(next) ||
         QUOTE.test(next) ||
         FENCE.test(next.trim()) ||
-        TABLE_ROW.test(next.trim())
+        TABLE_ROW.test(next.trim()) ||
+        HTML_BLOCK.test(next.trim())
       ) {
         break
       }
@@ -148,8 +203,8 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
 
 /**
  * Shields-style badge URLs carry their own label: `badge/Electron-45-2b2e3a`
- * is "Electron 45". The renderer cannot load remote images (the CSP allows only
- * launcher and Modrinth hosts), so badges are shown as text using this.
+ * is "Electron 45". The README uses a strip of them as a technology list, so
+ * they stay compact text pills instead of becoming remote images.
  */
 export function badgeLabel(url: string, alt = ''): string | null {
   const match = /^https?:\/\/img\.shields\.io\/badge\/([^/?#]+)/.exec(url)
