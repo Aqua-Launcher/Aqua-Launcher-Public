@@ -7,10 +7,12 @@ import { safeStorage, shell } from 'electron'
 import { atomicWriteFile, errorMessage, fetchWithRetry } from './util.js'
 import { describeMissingCredentials, readMicrosoftCredentials } from './private-credentials.js'
 
-// /common accepts both personal Microsoft accounts and work/school accounts, so
-// an app registered as "any organization + personal" can sign in either way.
-const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/token'
-const AUTHORIZE_ENDPOINT = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize'
+// Minecraft Java Edition is tied to personal Microsoft accounts, and the
+// XboxLive.signin scope only exists in the consumer tenant. /common resolves to
+// a work tenant for organizational accounts, which rejects that scope outright,
+// so the consumer endpoint is used for both authorize and token requests.
+const TOKEN_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
+const AUTHORIZE_ENDPOINT = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize'
 const SCOPES = 'XboxLive.signin offline_access'
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -18,7 +20,7 @@ function base64Url(buffer) {
   return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
-function friendlyMicrosoftError(status, body) {
+function friendlyMicrosoftError(status, body, grantType = '') {
   let parsed = null
   try {
     parsed = typeof body === 'string' ? JSON.parse(body) : body
@@ -42,9 +44,12 @@ function friendlyMicrosoftError(status, body) {
     return 'The Azure redirect URI is not configured as a mobile and desktop application. Add http://localhost as a mobile/desktop redirect.'
   }
   if (aad === 'AADSTS90023') {
-    return 'This Azure app is registered as a public client, so Microsoft refuses a client secret. Aqua retries sign-in without it; remove clientSecret from private/microsoft.json if this keeps appearing.'
+    return 'This Azure app is registered as a public client, so Microsoft refuses a client secret. Remove clientSecret from private/microsoft.json: PKCE sign-in needs none.'
   }
   if (code === 'invalid_grant' || /expired|revoked/i.test(description)) {
+    if (grantType === 'authorization_code') {
+      return 'Microsoft rejected the sign-in code before it could be exchanged. Close the leftover sign-in tab and try again from the launcher.'
+    }
     return 'Your Microsoft session has expired. Sign in again to continue.'
   }
   if (code === 'invalid_client') {
@@ -76,7 +81,7 @@ async function tokenRequest(params) {
     throw new Error('Microsoft returned an unreadable response.')
   }
   if (!response.ok || body?.error) {
-    const error = new Error(friendlyMicrosoftError(response.status, text))
+    const error = new Error(friendlyMicrosoftError(response.status, text, params?.grant_type))
     error.status = response.status
     error.aadCode = `${body?.error_description || body?.error || ''}`.match(/AADSTS\d+/)?.[0] || ''
     error.authError = ['invalid_grant', 'invalid_client', 'unauthorized_client', 'consent_required'].includes(
@@ -96,10 +101,15 @@ async function tokenRequest(params) {
 async function requestToken(params, clientSecret) {
   if (!clientSecret) return tokenRequest(params)
   try {
-    return await tokenRequest({ ...params, client_secret: clientSecret })
+    // The PKCE (public client) exchange is attempted first. A desktop app with
+    // public client flows rejects a secret outright, and that rejected attempt
+    // still invalidates the single-use authorization code, so the secret must
+    // not be sent speculatively. A confidential registration answers
+    // AADSTS7000218 instead, and only then is the code retried with the secret.
+    return await tokenRequest(params)
   } catch (error) {
-    if (error.aadCode !== 'AADSTS90023') throw error
-    return tokenRequest(params)
+    if (error.aadCode !== 'AADSTS7000218' && error.aadCode !== 'AADSTS7000219') throw error
+    return tokenRequest({ ...params, client_secret: clientSecret })
   }
 }
 
@@ -348,11 +358,14 @@ export class AccountManager {
         response.end(authPage(false, 'Sign-in was not completed', 'You can return to Aqua and try again.'))
         server.close()
         const detail = description.replace(/\+/g, ' ').slice(0, 400)
+        const tenantScopeError = /not configured for this tenant/i.test(detail)
         this.failLogin(
           login,
           oauthError === 'server_error'
             ? `Microsoft could not complete this sign-in (server_error). The Azure app registration is likely inconsistent: set requestedAccessTokenVersion to 2 in its manifest, or create a fresh registration with a desktop redirect. Details: ${detail}`
-            : detail,
+            : tenantScopeError
+              ? `Microsoft rejected the Xbox Live sign-in scope for this tenant. Sign in with the personal Microsoft account that owns Minecraft — work and school accounts cannot use it. Details: ${detail}`
+              : detail,
         )
         return
       }
